@@ -47,7 +47,34 @@ echo "Smoke test: scraping today's papers..."
 "$VENV/bin/python" src/scraper.py
 "$VENV/bin/python" src/processor.py
 
-# 5. Install launchd plists (rewriting paths to match this install)
+# 5. macOS Application Firewall allow rule
+#
+# If the firewall is enabled, unknown binaries silently drop incoming
+# connections after the TCP handshake (they complete the 3-way handshake
+# at kernel level, then RST after ~3 seconds). For Homebrew Python this
+# means OpenDisplay clients connect, are accepted, then kicked without
+# ever reaching user-space. Explicitly allow the Python.app bundle we're
+# using so incoming connections are actually delivered to us.
+#
+# Requires sudo; if we don't have passwordless sudo, print a warning and
+# leave the rule unchanged — the user can add it manually later.
+PY_APP_BUNDLE="$("$VENV/bin/python" -c 'import sys, os, pathlib; p = pathlib.Path(os.path.realpath(sys.executable)); print(p.parents[2])')"
+if [ -d "$PY_APP_BUNDLE" ]; then
+    FW_CLI="/usr/libexec/ApplicationFirewall/socketfilterfw"
+    if [ -x "$FW_CLI" ]; then
+        echo "Registering Python with macOS Application Firewall: $PY_APP_BUNDLE"
+        if sudo -n "$FW_CLI" --add "$PY_APP_BUNDLE" 2>/dev/null; then
+            sudo -n "$FW_CLI" --unblockapp "$PY_APP_BUNDLE" >/dev/null 2>&1 || true
+        else
+            echo "  NOTE: could not add firewall rule without sudo. If OpenDisplay clients"
+            echo "  connect but never receive images, run manually:"
+            echo "    sudo $FW_CLI --add '$PY_APP_BUNDLE'"
+            echo "    sudo $FW_CLI --unblockapp '$PY_APP_BUNDLE'"
+        fi
+    fi
+fi
+
+# 6. Install launchd plists (rewriting paths to match this install)
 mkdir -p "$LAUNCH_DIR"
 for plist in com.e-newspaper.server com.e-newspaper.daily-update; do
     src="$PROJECT_DIR/deploy/${plist}.plist"
