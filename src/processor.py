@@ -145,7 +145,8 @@ def process_image(
         # White background — feels more like real newsprint than black bars
         canvas = Image.new("L", (target_w, target_h), 255)
         canvas.paste(scaled, ((target_w - new_w) // 2, (target_h - new_h) // 2))
-    elif fit_mode == "cover":
+    elif fit_mode in ("cover", "cover_top"):
+        # Scale so the image fills the target completely, cropping overflow.
         if src_aspect > target_aspect:
             new_h = target_h
             new_w = round(target_h * src_aspect)
@@ -154,9 +155,15 @@ def process_image(
             new_h = round(target_w / src_aspect)
 
         scaled = img_gray.resize((new_w, new_h), Image.LANCZOS)
-        # Center-crop to target
-        left = (new_w - target_w) // 2
-        top = (new_h - target_h) // 2
+        # "cover" is a center crop; "cover_top" anchors the top and crops the
+        # bottom (useful for newspapers — preserves the masthead and lead
+        # headlines, trims the bottom columns).
+        if fit_mode == "cover_top":
+            left = (new_w - target_w) // 2
+            top = 0
+        else:
+            left = (new_w - target_w) // 2
+            top = (new_h - target_h) // 2
         canvas = scaled.crop((left, top, left + target_w, top + target_h))
     else:
         raise ValueError(f"Unknown fit_mode: {fit_mode!r}")

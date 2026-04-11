@@ -28,8 +28,8 @@
     "_orientation_comment": "landscape (2880x2160) or portrait (2160x2880). Newspapers fit better in portrait.",
     "orientation": "portrait",
 
-    "_fit_mode_comment": "contain (letterbox, preserve full page) or cover (crop to fill)",
-    "fit_mode": "contain",
+    "_fit_mode_comment": "contain (letterbox, preserve full page), cover (center-crop to fill), cover_top (fill edge-to-edge, anchor top, crop bottom — best for newspapers because it preserves the masthead)",
+    "fit_mode": "cover_top",
 
     "_rotation_comment": "Final clockwise rotation in degrees (0/90/180/270). Use when the physical display is mounted in a different orientation than the content is composed at. Current setup: portrait content on a physically landscape-mounted 42in display = 90.",
     "rotation": 90
