@@ -21,6 +21,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import requests
+from PIL import Image
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 IMAGES_RAW = PROJECT_ROOT / "images" / "raw"
@@ -112,11 +113,82 @@ def download_nyt(target_day: date | None = None, dpi: int = DEFAULT_DPI) -> Path
     if not rendered.exists():
         raise RuntimeError(f"pdftoppm did not produce {rendered}")
 
+    # Auto-trim the print-plate bleed: NYT's PDF includes a top row of
+    # CMYK registration marks, filename, and price info, plus some
+    # whitespace at the bottom. We find the actual content bounds by
+    # scanning ink density row-by-row.
     final_path = IMAGES_RAW / "the-new-york-times.webp"
-    rendered.rename(final_path)
+    trimmed = _trim_print_bleed(rendered)
+    trimmed.save(final_path, format="JPEG", quality=92)
+    rendered.unlink(missing_ok=True)
     pdf_path.unlink(missing_ok=True)
-    logger.info("Saved %s", final_path)
+    logger.info("Saved %s (%s)", final_path, trimmed.size)
     return final_path
+
+
+def _trim_print_bleed(img_path: Path) -> Image.Image:
+    """
+    Crop the print-plate bleed areas off a NYT scan.
+
+    The PDF includes, above the newspaper proper:
+      - CMYK colour registration marks
+      - A filename line like `Nxxx,2026-04-11,A,001,Bs-4C,E1_+`
+      - A price indicator
+    and below the last article some whitespace.
+
+    We walk the rows from top and bottom looking for dense content blocks
+    (where at least 10% of the row is ink-like), with the threshold low
+    enough to catch the masthead but high enough to skip the sparse print
+    marks. A small margin above the masthead preserves the "All the News
+    That's Fit to Print" banner.
+    """
+    img = Image.open(img_path)
+    gray = img.convert("L")
+    # Row ink density — fraction of pixels darker than "near-white".
+    # Use numpy if available, fall back to a pure-Python implementation so
+    # the scraper still runs on minimal installs.
+    try:
+        import numpy as np
+        arr = np.array(gray)
+        h, w = arr.shape
+        row_density = (arr < 200).sum(axis=1) / w
+    except ImportError:
+        px = gray.load()
+        w, h = gray.size
+        row_density = [
+            sum(1 for x in range(w) if px[x, y] < 200) / w for y in range(h)
+        ]
+
+    # The NYT PDF has a printer-mark band at y~80-110 (CMYK, filename, price)
+    # with 6-9% ink density, followed by ~100 rows of whitespace, then the
+    # masthead at y=220+ with 24-44% density. A 20% threshold cleanly skips
+    # the printer marks and lands on the first real masthead row.
+    DENSE_THRESHOLD = 0.20
+
+    # Find first dense row from the top
+    top = 0
+    for y in range(h):
+        if row_density[y] >= DENSE_THRESHOLD:
+            top = y
+            break
+
+    # Find last dense row from the bottom.
+    bottom = h
+    for y in range(h - 1, -1, -1):
+        if row_density[y] >= DENSE_THRESHOLD:
+            bottom = y + 1
+            break
+
+    # Generous margin above the first dense row to preserve the "All the News
+    # That's Fit to Print" banner that sits above the masthead proper. Below,
+    # a small margin is enough.
+    top_margin = max(30, h // 100)
+    bottom_margin = max(8, h // 500)
+    top = max(0, top - top_margin)
+    bottom = min(h, bottom + bottom_margin)
+
+    logger.info("Trimming NYT print bleed: y=%d..%d of %d", top, bottom, h)
+    return img.crop((0, top, img.width, bottom))
 
 
 def main(argv: list[str]) -> int:
