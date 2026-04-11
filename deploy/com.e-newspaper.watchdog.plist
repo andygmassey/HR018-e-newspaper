@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        e-newspaper display watchdog.
+
+        Runs src/watchdog.py once every 5 minutes. It reads the heartbeat
+        file (images/last-poll.txt, touched by server.py on every request
+        from the display) and checks whether the last poll is within
+        config.watchdog.threshold_seconds (default 900 = 3 missed polls).
+        Writes current state to images/status.json and logs transitions
+        to watchdog.log.
+
+        This is the right health signal: the display polls out through
+        the TP-Link bridge's NAT, so ICMP to the display from the Mac
+        mini can never work, but the server sees every poll even through
+        NAT. No IP reservations required.
+
+        Detection only — when the pipeline breaks (typically the TP-Link
+        bridge dropping its Wi-Fi association with Massey) the recovery
+        path is physical, not something the Mac mini can do remotely.
+        Watchdog's job is to make sure you find out fast.
+
+        Install:
+          cp deploy/com.e-newspaper.watchdog.plist ~/Library/LaunchAgents/
+          launchctl load ~/Library/LaunchAgents/com.e-newspaper.watchdog.plist
+
+        Tail alerts:
+          tail -F watchdog.log | grep -E "RECOVERED|UNHEALTHY"
+
+        Inspect current state:
+          cat images/status.json
+
+        Note: deploy/install.sh should rewrite __INSTALL_DIR__ before
+        copying this file into ~/Library/LaunchAgents.
+    -->
+    <key>Label</key>
+    <string>com.e-newspaper.watchdog</string>
+
+    <key>WorkingDirectory</key>
+    <string>__INSTALL_DIR__</string>
+
+    <!--
+        Keep PATH consistent with the daily-update job. Not strictly
+        required here (we only call /sbin/ping, which is at a fixed
+        absolute path), but cheap insurance.
+    -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>.venv/bin/python src/watchdog.py &gt;&gt; watchdog.log 2&gt;&amp;1</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__INSTALL_DIR__/launchd-watchdog.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__INSTALL_DIR__/launchd-watchdog.err.log</string>
+</dict>
+</plist>

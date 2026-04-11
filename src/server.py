@@ -22,6 +22,7 @@ import shutil
 import signal
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -33,6 +34,13 @@ from opendisplay.wifi.server import OpenDisplayServer
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CURRENT_IMAGE = PROJECT_ROOT / "images" / "current.png"
+
+# Heartbeat file: the provider touches this on every request from the
+# display, writing the current ISO timestamp. The watchdog checks the
+# mtime/contents to decide whether the pipeline is healthy. This is the
+# right health signal because ICMP to the display can't cross the TP-Link
+# bridge's NAT but the display IS polling outbound, which the server sees.
+LAST_POLL_PATH = PROJECT_ROOT / "images" / "last-poll.txt"
 
 # Display polls this often (seconds). Newspaper updates daily, so a generous
 # interval is fine — the display only needs to check periodically. 5 minutes
@@ -63,7 +71,23 @@ class CurrentImageProvider:
     def __init__(self, image_path: Path) -> None:
         self.image_path = image_path
 
+    def _touch_heartbeat(self) -> None:
+        """Write current wall-clock time to LAST_POLL_PATH. Never raises
+        — heartbeat failure must not break the image path."""
+        try:
+            LAST_POLL_PATH.parent.mkdir(parents=True, exist_ok=True)
+            LAST_POLL_PATH.write_text(
+                datetime.now().astimezone().isoformat(timespec="seconds")
+            )
+        except Exception:
+            logger.exception("Failed to write heartbeat file")
+
     def __call__(self, announcement: Optional[DisplayAnnouncement]) -> Optional[bytes]:
+        # Touch the heartbeat on every provider invocation (which equals
+        # every poll from the display, whether or not we end up sending
+        # a new image). This is what the watchdog reads.
+        self._touch_heartbeat()
+
         if announcement is None:
             logger.warning("Provider called before announcement received; no image")
             return None
