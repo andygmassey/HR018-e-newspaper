@@ -180,10 +180,11 @@ def _trim_print_bleed(img_path: Path) -> Image.Image:
             break
 
     # Generous margin above the first dense row to preserve the "All the News
-    # That's Fit to Print" banner that sits above the masthead proper. Below,
-    # a small margin is enough.
+    # That's Fit to Print" banner that sits above the masthead proper. Also
+    # leave a bit more room at the bottom — the density-threshold heuristic
+    # can clip the last line of a trailing column if it's not very ink-dense.
     top_margin = max(30, h // 100)
-    bottom_margin = max(8, h // 500)
+    bottom_margin = max(40, h // 100)
     top = max(0, top - top_margin)
     bottom = min(h, bottom + bottom_margin)
 
