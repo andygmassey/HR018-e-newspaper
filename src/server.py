@@ -185,9 +185,23 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--image", type=Path, default=CURRENT_IMAGE)
     args = parser.parse_args(argv[1:])
 
+    # Explicit StreamHandler with line_buffering forced on — Python's -u
+    # flag alone doesn't reliably unbuffer stderr under launchd. Reconfigure
+    # stdout/stderr too so any stray print() also flushes per-line.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)  # type: ignore[attr-defined]
+        sys.stderr.reconfigure(line_buffering=True)  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    )
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=[handler],
+        force=True,
     )
 
     asyncio.run(
