@@ -18,7 +18,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import shutil
 import signal
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -86,6 +88,42 @@ class CurrentImageProvider:
             return None
 
 
+def _start_dns_sd(port: int) -> Optional[subprocess.Popen]:
+    """
+    Advertise the OpenDisplay service using macOS's native dns-sd tool.
+
+    On macOS, python-zeroconf (used by py-opendisplay) conflicts with the
+    system mDNSResponder for UDP port 5353 and fails silently. The
+    workaround is to shell out to /usr/bin/dns-sd which uses the system
+    responder directly and plays nicely with everything else on the LAN.
+
+    Returns the Popen handle (so we can terminate it on shutdown), or
+    None if dns-sd isn't available (e.g. on Linux).
+    """
+    dns_sd = shutil.which("dns-sd")
+    if not dns_sd:
+        logger.warning("/usr/bin/dns-sd not found; mDNS advertising skipped")
+        return None
+
+    # dns-sd -R <name> <type> <domain> <port>
+    # It runs in the foreground until killed. We drop its output to DEVNULL
+    # but still log that we started it.
+    proc = subprocess.Popen(
+        [
+            dns_sd,
+            "-R",
+            "OpenDisplay E-Newspaper",
+            "_opendisplay._tcp",
+            ".",
+            str(port),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    logger.info("mDNS: advertising _opendisplay._tcp port %d via dns-sd (pid %d)", port, proc.pid)
+    return proc
+
+
 async def run(
     port: int,
     poll_interval: int,
@@ -94,14 +132,20 @@ async def run(
 ) -> None:
     provider = CurrentImageProvider(image_path)
 
+    # We always pass mdns=False to py-opendisplay because its python-zeroconf
+    # backend is broken on macOS. When the caller asked for mDNS, we spawn
+    # /usr/bin/dns-sd instead.
     server = OpenDisplayServer(
         port=port,
         image_provider=provider,
         poll_interval=poll_interval,
-        mdns=mdns,
+        mdns=False,
     )
 
     await server.start()
+
+    dns_sd_proc = _start_dns_sd(server.actual_port) if mdns else None
+
     logger.info(
         "OpenDisplay server running on port %d, poll_interval=%ds, mdns=%s, image=%s",
         server.actual_port,
@@ -124,6 +168,12 @@ async def run(
         await stop_event.wait()
     finally:
         logger.info("Shutting down")
+        if dns_sd_proc is not None:
+            dns_sd_proc.terminate()
+            try:
+                dns_sd_proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                dns_sd_proc.kill()
         await server.stop()
 
 
