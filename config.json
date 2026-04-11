@@ -1,0 +1,33 @@
+{
+    "_comment": "Selection strategy for which paper to display each day",
+    "selection": "weekday",
+
+    "_weekday_map_comment": "0=Monday .. 6=Sunday. Used when selection='weekday'",
+    "weekday_map": {
+        "0": "south-china-morning-post",
+        "1": "the-new-york-times",
+        "2": "south-china-morning-post",
+        "3": "the-washington-post",
+        "4": "financial-times",
+        "5": "the-new-york-times",
+        "6": "financial-times"
+    },
+
+    "_rotation_comment": "Cycles through these one per day. Used when selection='rotate'",
+    "rotation": [
+        "south-china-morning-post",
+        "financial-times",
+        "the-new-york-times",
+        "the-washington-post",
+        "the-globe-and-mail"
+    ],
+
+    "_fixed_comment": "Always show this paper. Used when selection='fixed'",
+    "fixed": "financial-times",
+
+    "_orientation_comment": "landscape (2880x2160) or portrait (2160x2880). Newspapers fit better in portrait.",
+    "orientation": "portrait",
+
+    "_fit_mode_comment": "contain (letterbox, preserve full page) or cover (crop to fill)",
+    "fit_mode": "contain"
+}

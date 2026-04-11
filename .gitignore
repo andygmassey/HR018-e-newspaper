@@ -1,0 +1,18 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Generated images and logs
+images/raw/
+images/processed/
+images/current.png
+images/manifest.json
+*.log
+launchd-*.out.log
+launchd-*.err.log
+
+# OS
+.DS_Store

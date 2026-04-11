@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        Daily newspaper update job.
+
+        Runs at 07:00 HKT every day:
+          1. scraper.py downloads today's papers from frontpages.com
+          2. processor.py processes the chosen paper for the e-ink display
+        The OpenDisplay server (separate launchd job) picks up the new
+        images/current.png on its next client poll.
+
+        Install:
+          cp deploy/com.e-newspaper.daily-update.plist ~/Library/LaunchAgents/
+          launchctl load ~/Library/LaunchAgents/com.e-newspaper.daily-update.plist
+
+        Manually trigger a run:
+          launchctl start com.e-newspaper.daily-update
+
+        Tail logs:
+          tail -f <install-dir>/scraper.log
+
+        Note: deploy/install.sh rewrites __INSTALL_DIR__ to match the
+        actual install location before copying this file into ~/Library/LaunchAgents.
+    -->
+    <key>Label</key>
+    <string>com.e-newspaper.daily-update</string>
+
+    <key>WorkingDirectory</key>
+    <string>__INSTALL_DIR__</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>.venv/bin/python src/scraper.py &gt;&gt; scraper.log 2&gt;&amp;1 &amp;&amp; .venv/bin/python src/processor.py &gt;&gt; scraper.log 2&gt;&amp;1</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- Run again at 08:00 in case 07:00 missed (some papers update late) -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__INSTALL_DIR__/launchd-update.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__INSTALL_DIR__/launchd-update.err.log</string>
+</dict>
+</plist>

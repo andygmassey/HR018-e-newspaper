@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        OpenDisplay WiFi server (always-on).
+
+        Runs continuously, restarted by launchd if it crashes. Listens on
+        TCP 2446 and advertises via mDNS so the EPD-42S display can find it
+        on the LAN.
+
+        Install:
+          cp deploy/com.e-newspaper.server.plist ~/Library/LaunchAgents/
+          launchctl load ~/Library/LaunchAgents/com.e-newspaper.server.plist
+
+        Restart after editing:
+          launchctl unload ~/Library/LaunchAgents/com.e-newspaper.server.plist
+          launchctl load ~/Library/LaunchAgents/com.e-newspaper.server.plist
+
+        Tail logs:
+          tail -f <install-dir>/server.log
+
+        Note: deploy/install.sh rewrites __INSTALL_DIR__ to match the
+        actual install location before copying this file into ~/Library/LaunchAgents.
+    -->
+    <key>Label</key>
+    <string>com.e-newspaper.server</string>
+
+    <key>WorkingDirectory</key>
+    <string>__INSTALL_DIR__</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__INSTALL_DIR__/.venv/bin/python</string>
+        <string>src/server.py</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Throttle restarts after a crash so we don't loop tightly -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__INSTALL_DIR__/server.log</string>
+    <key>StandardErrorPath</key>
+    <string>__INSTALL_DIR__/server.err.log</string>
+</dict>
+</plist>
