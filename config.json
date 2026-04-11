@@ -29,5 +29,8 @@
     "orientation": "portrait",
 
     "_fit_mode_comment": "contain (letterbox, preserve full page) or cover (crop to fill)",
-    "fit_mode": "contain"
+    "fit_mode": "contain",
+
+    "_rotation_comment": "Final clockwise rotation in degrees (0/90/180/270). Use when the physical display is mounted in a different orientation than the content is composed at. Current setup: portrait content on a physically landscape-mounted 42in display = 90.",
+    "rotation": 90
 }

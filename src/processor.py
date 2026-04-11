@@ -94,6 +94,7 @@ def process_image(
     out_path: Path,
     orientation: str = DEFAULT_ORIENTATION,
     fit_mode: str = "contain",
+    rotation: int = 0,
 ) -> Image.Image:
     """
     Resize and dither a newspaper image for the e-ink display.
@@ -102,8 +103,18 @@ def process_image(
         src_path: Source webp/png/jpg.
         out_path: Where to write the processed PNG.
         orientation: "landscape" (2880x2160) or "portrait" (2160x2880).
+                     This is the orientation at which the newspaper content
+                     is composed — usually "portrait" since newspapers are
+                     taller than wide.
         fit_mode: "contain" letterboxes (preserves entire page);
                   "cover" crops to fill (loses some edges).
+        rotation: Final clockwise rotation in degrees (0, 90, 180, 270)
+                  applied after fitting. Use this when the physical display
+                  is mounted in a different orientation than the content.
+                  For example, render portrait content at 2160x2880 then
+                  rotate 90 to get a 2880x2160 landscape image that reads
+                  correctly on a physically landscape-mounted display held
+                  sideways.
 
     Returns the final PIL Image.
     """
@@ -150,11 +161,19 @@ def process_image(
     else:
         raise ValueError(f"Unknown fit_mode: {fit_mode!r}")
 
+    # Optional post-rotation for displays that are physically mounted in a
+    # different orientation than the content is composed at. PIL's rotate
+    # argument is counter-clockwise, so we negate to get clockwise.
+    if rotation not in (0, 90, 180, 270):
+        raise ValueError(f"rotation must be 0/90/180/270, got {rotation}")
+    if rotation:
+        canvas = canvas.rotate(-rotation, expand=True)
+
     # Save grayscale PNG. The OpenDisplay server (or display itself) will
     # apply the final 1-bit dither using its own waveform-aware logic.
     out_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(out_path, format="PNG", optimize=True)
-    logger.info("Wrote %s (%dx%d)", out_path, target_w, target_h)
+    logger.info("Wrote %s (%dx%d rotation=%d)", out_path, canvas.width, canvas.height, rotation)
     return canvas
 
 
@@ -176,6 +195,7 @@ def process_today(config: dict | None = None) -> Path:
         out,
         orientation=config.get("orientation", DEFAULT_ORIENTATION),
         fit_mode=config.get("fit_mode", "contain"),
+        rotation=int(config.get("rotation", 0)),
     )
 
     # Update current.png as a copy (not symlink — Android client may not handle symlinks)
@@ -205,6 +225,7 @@ def main(argv: list[str]) -> int:
                 out,
                 orientation=config.get("orientation", DEFAULT_ORIENTATION),
                 fit_mode=config.get("fit_mode", "contain"),
+                rotation=int(config.get("rotation", 0)),
             )
         return 0
 
@@ -220,6 +241,7 @@ def main(argv: list[str]) -> int:
             out,
             orientation=config.get("orientation", DEFAULT_ORIENTATION),
             fit_mode=config.get("fit_mode", "contain"),
+            rotation=int(config.get("rotation", 0)),
         )
         shutil.copy2(out, CURRENT_IMAGE)
         return 0
