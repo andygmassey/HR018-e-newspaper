@@ -48,9 +48,16 @@ class CurrentImageProvider:
     Image provider callable that loads images/current.png on each request.
 
     py-opendisplay's server calls the provider every time the display polls,
-    passing the display's announcement (resolution + colour scheme). We use
-    the announcement to size the image correctly. The server itself
-    deduplicates by SHA-256, so we don't need to cache here.
+    passing the display's announcement (resolution + colour scheme). The
+    server itself deduplicates by SHA-256, so we don't need to cache here.
+
+    This provider ships the raw PNG bytes on the wire (not the 1bpp dithered
+    output py-opendisplay produces by default). A matching patch in the
+    OpenDisplay Android client tries BitmapFactory.decodeByteArray() on the
+    image_data before falling back to the library's bit-unpacking decoder.
+    Sending a real PNG gives Android a grayscale Bitmap which, combined with
+    a GC16 invalidate mode, lets the Avalue EPDC render actual gray levels
+    instead of just stippled 1-bit output.
     """
 
     def __init__(self, image_path: Path) -> None:
@@ -66,25 +73,34 @@ class CurrentImageProvider:
             return None
 
         try:
-            img = Image.open(self.image_path)
+            data = self.image_path.read_bytes()
+            # Sanity-check PNG magic number so we don't ship garbage if the
+            # file is being rewritten as we read it.
+            if not data.startswith(b"\x89PNG"):
+                logger.warning(
+                    "%s does not look like a PNG (first bytes %r); falling "
+                    "back to 1bpp encoding",
+                    self.image_path,
+                    data[:8],
+                )
+                img = Image.open(self.image_path)
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+                data = image_to_1bpp(img, announcement.width, announcement.height)
+                logger.info("Encoded 1bpp fallback: %d bytes", len(data))
+                return data
+
             logger.info(
-                "Encoding %s (%s, %s) for display %dx%d scheme=%d",
+                "Sending raw PNG %s (%d bytes) to display %dx%d scheme=%d",
                 self.image_path.name,
-                img.size,
-                img.mode,
+                len(data),
                 announcement.width,
                 announcement.height,
                 announcement.colour_scheme,
             )
-            # py-opendisplay's fit_image pads with an RGB tuple, so the input
-            # must be in RGB mode (or a mode that can accept tuple fill).
-            if img.mode != "RGB":
-                img = img.convert("RGB")
-            data = image_to_1bpp(img, announcement.width, announcement.height)
-            logger.info("Encoded image: %d bytes", len(data))
             return data
         except Exception:
-            logger.exception("Failed to load/encode image")
+            logger.exception("Failed to load image")
             return None
 
 
