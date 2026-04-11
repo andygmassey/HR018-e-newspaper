@@ -48,6 +48,7 @@ EPD-42S Display (on LAN via Ethernet or WiFi bridge)
 - **py-opendisplay** — OpenDisplay WiFi protocol server
 - **Pillow** — image processing
 - **beautifulsoup4 + requests** — newspaper scraping
+- **poppler** (`pdftoppm`) — rasterising PDF front pages (NYT scraper)
 - **launchd** — macOS service management
 
 ## Commands
@@ -78,21 +79,30 @@ python src/server.py
 python tests/test_e2e.py
 ```
 
-## Newspaper Source
+## Newspaper Sources
 
-Primary: **frontpages.com** — aggregates ~130 newspapers daily, updated
-overnight UK time. Major UK broadsheets (Guardian, Times, Telegraph,
-Daily Mail) are NOT on frontpages.com. The available UK-relevant titles
-are Financial Times, City AM, Yorkshire Post, Morning Star, plus regional
-papers and the Irish Times. International titles include the New York
-Times, Washington Post, Globe and Mail, South China Morning Post, and
-Japan Times.
+The scraper has a two-tier strategy:
 
-Image resolution from frontpages.com is limited (the public `@2x.webp`
-URLs are 600×800 thumbnails). On a 42" e-ink display with Floyd–Steinberg
-dithering, headlines and body text remain readable, but for higher
-fidelity a different source would be needed (PressReader via a library
-card, or direct PDF editions).
+1. **High-resolution per-paper scrapers** (preferred) — registered in
+   `scraper.py`'s `HIRES_SCRAPERS` dict. For papers where we know a
+   direct PDF or large-image source, we fetch that instead of the
+   thumbnail aggregator. Current high-res scrapers:
+
+   - **The New York Times** (`src/nyt_scraper.py`) — pulls the public
+     print-edition PDF from `static01.nyt.com/images/YYYY/MM/DD/nytfrontpage/scan.pdf`
+     and rasterises it at 200 DPI via `pdftoppm`, yielding ~2442x4685
+     pixels. Requires poppler on the host (`brew install poppler`).
+
+2. **frontpages.com fallback** — aggregates ~130 newspapers daily
+   at 600x800 webp thumbnails. No subscription required. Covers
+   Financial Times, South China Morning Post, Washington Post, Globe and
+   Mail, Irish Times, and many international titles. Resolution is
+   mediocre but adequate for secondary papers.
+
+Major UK broadsheets (Guardian, Times, Telegraph, Daily Mail) are NOT on
+frontpages.com. For those, the path forward is PressReader access via a
+public library card (HKPL works for Hong Kong residents), or building
+per-publisher high-res scrapers similar to the NYT one.
 
 ## OpenDisplay Protocol Notes
 

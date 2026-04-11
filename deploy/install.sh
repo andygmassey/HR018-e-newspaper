@@ -27,6 +27,14 @@ fi
 PY_VERSION=$(python3.11 --version 2>&1)
 echo "Using $PY_VERSION"
 
+# poppler for NYT PDF rendering (optional — scraper falls back gracefully
+# to frontpages.com for NYT if pdftoppm isn't available, but output is
+# far softer)
+if ! command -v pdftoppm >/dev/null 2>&1; then
+    echo "NOTE: pdftoppm not found. For the highest-quality NYT front page,"
+    echo "      install poppler:  brew install poppler"
+fi
+
 # 2. Create / refresh venv
 if [ ! -d "$VENV" ]; then
     echo "Creating venv at $VENV"

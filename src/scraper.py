@@ -164,6 +164,35 @@ def save_manifest(manifest: dict) -> None:
     MANIFEST.write_text(json.dumps(manifest, indent=2))
 
 
+# Paper-slug → high-resolution scraper module override.
+#
+# For these papers we have a direct PDF/high-res source that produces
+# dramatically sharper output than frontpages.com's 600×800 thumbnails.
+# The main() function will try these first and fall back to the generic
+# frontpages.com scraper if they fail.
+HIRES_SCRAPERS = {
+    "the-new-york-times": "nyt_scraper",
+}
+
+
+def _run_hires(slug: str) -> bool:
+    """Attempt to fetch a high-res version of `slug`. Returns True on success."""
+    module_name = HIRES_SCRAPERS.get(slug)
+    if not module_name:
+        return False
+    try:
+        import importlib
+        mod = importlib.import_module(module_name)
+        if slug == "the-new-york-times":
+            mod.download_nyt()
+            return True
+        # Future: other per-paper hi-res scrapers go here
+    except Exception:
+        logger.exception("High-res scraper %s for %s failed — falling back", module_name, slug)
+        return False
+    return False
+
+
 def main(argv: list[str]) -> int:
     logging.basicConfig(
         level=logging.INFO,
@@ -189,7 +218,22 @@ def main(argv: list[str]) -> int:
     ]
     slugs = argv[1:] if len(argv) > 1 else default_slugs
 
-    manifest = scrape(slugs=slugs)
+    # Try high-res scrapers first; collect the slugs that fall through to
+    # the generic frontpages.com pipeline.
+    hires_done: set[str] = set()
+    for slug in slugs:
+        if slug in HIRES_SCRAPERS:
+            logger.info("Using high-res scraper for %s", slug)
+            if _run_hires(slug):
+                hires_done.add(slug)
+
+    remaining = [s for s in slugs if s not in hires_done]
+    if remaining:
+        manifest = scrape(slugs=remaining)
+    else:
+        manifest = {"downloaded": {}, "papers": {}}
+    for slug in hires_done:
+        manifest["downloaded"][slug] = {"status": "ok", "source": "hires"}
     save_manifest(manifest)
 
     ok = sum(1 for d in manifest["downloaded"].values() if d.get("status") == "ok")
