@@ -32,6 +32,10 @@
     <key>ProgramArguments</key>
     <array>
         <string>__INSTALL_DIR__/.venv/bin/python</string>
+        <!-- -u keeps stdout/stderr unbuffered so launchd's log redirection
+             picks up every line as it's written. Without this, Python's
+             default block buffering means you only see logs on exit. -->
+        <string>-u</string>
         <string>src/server.py</string>
     </array>
 
