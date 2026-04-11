@@ -1,35 +1,34 @@
-# ===== POST 1: The big announcement =====
+# ===== POST 1: Main thread opener =====
 
-**📰 Got the e-newspaper working on my EPD-42S!**
+📰 **Got a daily newspaper running on my EPD-42S!** NYT front page at full PDF quality, real grayscale, auto-updating at 07:00 every morning.
 
-Daily newspaper front page auto-updating every morning, driven by a Mac mini + the TP-Link WR802N as a WiFi-to-Ethernet bridge to the display. Today it's showing the New York Times. Looks fantastic dithered on the e-ink.
-
-Source + all my fixes: https://github.com/andygmassey/HR018-e-newspaper
+Source + every patch I had to make: https://github.com/andygmassey/HR018-e-newspaper
 
 Pipeline:
-• Cron at 07:00 HKT scrapes frontpages.com for ~130 daily newspapers
-• Picks today's paper per a weekday schedule (FT on Fridays, SCMP midweek, etc.)
-• Processes to 2880×2160 with Floyd–Steinberg dither
-• Serves via OpenDisplay WiFi protocol to the display
+• 07:00 HKT: Mac mini downloads today's NYT print-edition PDF from `static01.nyt.com/images/YYYY/MM/DD/nytfrontpage/scan.pdf`
+• Rasterised at 200 DPI → ~2442×4685 pixels
+• Auto-trim printer-plate bleed (CMYK marks, filename, price row at top)
+• Fit edge-to-edge with top-anchored crop, rotate 90° for a landscape-mounted display
+• Served as raw PNG via OpenDisplay WiFi protocol
+• Display receives, decodes with BitmapFactory, shows via `postInvalidate(101)` for GC16 grayscale refresh
 
-The backend uses @balloob's brilliant py-opendisplay (thanks!), plus a sideloaded + patched OpenDisplay Android APK with a hardcoded server IP since mDNS across a WiFi bridge is unreliable.
+Huge thanks to Paulus Schoutsen ([balloob on GitHub](https://github.com/balloob)) for OpenDisplay + py-opendisplay — I patched the Android app fairly heavily but the protocol + server are his work. Also thanks to @onlynai for the WiFi module details and the r/eink community in general.
 
-It took way longer than it should have — there were 5 or 6 gotchas along the way. I'll post them as replies in this thread in case anyone hits the same walls.
+Writeups of every gotcha below ⬇️
 
-# ===== POST 2: macOS firewall gotcha =====
+# ===== POST 2: macOS firewall silent RST =====
 
-**🧱 Gotcha #1: macOS Application Firewall silently RSTs Homebrew Python**
+🧱 **Gotcha 1: macOS Application Firewall silently RSTs Homebrew Python**
 
-This one cost me HOURS. If you run the OpenDisplay server on a Mac with the firewall enabled, and you're using Homebrew Python (not system Python), **incoming TCP connections complete the 3-way handshake and then get RST'd after ~3 seconds by the firewall, without the connection ever reaching your Python process**.
+If the firewall is on (default) and you run py-opendisplay's server via Homebrew Python, the TCP 3-way handshake completes at kernel level, packets get counted as "ESTABLISHED" in `netstat`, but after ~3 seconds the firewall sends a RST and the connection is never delivered to user-space. The `accept()` call just sits there forever.
 
-The debugging is diabolical because:
-• `netstat -anv | grep 2446` shows ESTABLISHED, attributed to your Python PID
-• `lsof -p <pid>` only shows the LISTEN socket
-• Python's `accept()` sits there forever
-• `pfctl -s rules` is empty
-• `socketfilterfw --getappblocked <python>` returns "permitted" even when it's being blocked
+The debugging is maddening because:
+• `netstat -anv` shows ESTABLISHED attributed to your Python PID
+• `lsof -p <pid>` only shows the LISTEN socket, no ESTABLISHED
+• `socketfilterfw --getappblocked <python>` returns "permitted" even when it isn't
+• `tcpdump` shows a clean handshake followed by a mystery RST
 
-The fix: register the Python.app bundle (not just `python3.11`) with the firewall:
+The fix: explicitly register the Python.app **bundle path** (not the `python3.11` symlink) with the firewall:
 ```
 sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add \
   /opt/homebrew/Cellar/python@3.11/3.11.15/Frameworks/Python.framework/Versions/3.11/Resources/Python.app
@@ -37,74 +36,76 @@ sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp \
   /opt/homebrew/Cellar/python@3.11/3.11.15/Frameworks/Python.framework/Versions/3.11/Resources/Python.app
 ```
 
-Packet capture showed:
-```
-SYN → SYN-ACK → ACK → FIN → ACK → (3 seconds of nothing) → RST
-```
-
-The RST isn't from Python; it's from the firewall kicking a connection it never liked. My install.sh now does this automatically.
+`install.sh` in my repo now does this automatically. This one cost me hours.
 
 # ===== POST 3: python-zeroconf vs mDNSResponder =====
 
-**🧱 Gotcha #2: py-opendisplay's mDNS doesn't advertise on macOS**
+🧱 **Gotcha 2: py-opendisplay's mDNS silently fails on macOS**
 
-py-opendisplay uses python-zeroconf for mDNS advertising. On macOS, that library tries to bind UDP 5353 — which is owned by the system mDNSResponder. The bind silently fails with ENORUTE:
+py-opendisplay uses `python-zeroconf` for mDNS advertising. On macOS, that library tries to bind UDP 5353 — which belongs to the system `mDNSResponder`. The bind fails:
 
 ```
 [WARNING] zeroconf: Error with socket 7 (('0.0.0.0', 5353))): [Errno 65] No route to host
 ```
 
-…but py-opendisplay logs "mDNS: advertised" anyway, because the exception is swallowed. The service is never registered, so OpenDisplay clients can't discover it.
+…but py-opendisplay catches the exception and logs "advertised" anyway, so the server *thinks* it's discoverable. It isn't. `dns-sd -B _opendisplay._tcp local` from any other machine returns nothing.
 
-**Fix:** shell out to `/usr/bin/dns-sd` (which uses the system responder properly) instead of python-zeroconf. I patched my server.py to spawn it as a subprocess:
+The fix: skip python-zeroconf entirely and shell out to Apple's own `/usr/bin/dns-sd`, which uses the system responder and plays nicely with every other Bonjour service on the LAN:
 
 ```
 /usr/bin/dns-sd -R "OpenDisplay E-Newspaper" _opendisplay._tcp . 2446
 ```
 
-After that, `dns-sd -B _opendisplay._tcp local` finds it immediately, and clients discover it across the LAN. Added this as a workaround in https://github.com/andygmassey/HR018-e-newspaper/blob/main/src/server.py — the server always uses dns-sd on macOS regardless of the mdns flag.
+My server.py spawns this as a subprocess on startup and kills it on shutdown. py-opendisplay's own mDNS is explicitly disabled.
 
-# ===== POST 4: TP-Link WR802N Client mode =====
+# ===== POST 4: TP-Link WR802N and the Android DHCP quirk =====
 
-**🧱 Gotcha #3: TP-Link WR802N "Client mode" and the display's DHCP quirk**
+🧱 **Gotcha 3: TP-Link WR802N Client mode + Android's stale ConnectivityManager**
 
-Set up my WR802N as a WiFi-to-Ethernet bridge. Two things bit me:
+Using a WR802N as a WiFi-to-Ethernet bridge to get the display on my LAN. Two fun issues:
 
-**1. Client mode isn't a true L2 bridge by default.** Initially the TP-Link ran its own DHCP on 192.168.1.0/24 — the SAME subnet as my home LAN — causing ARP to fail for every host on Massey. Had to switch explicitly to Client mode (not "Router" or "Hotspot"). Once joined to Massey, the display got a real DHCP lease from my home router and the TP-Link became a transparent bridge.
+1. **Client mode isn't a true L2 bridge by default.** Factory-fresh, the WR802N runs its own DHCP on 192.168.1.0/24 — same subnet as my home LAN — causing ARP storms for every host on the real network. Had to explicitly switch to Client mode *and* rejoin my home WiFi so it turns into a transparent bridge.
 
-**2. The display's stock firmware doesn't auto-DHCP eth0 on boot** unless you hold Vol+ / Vol- (as others have reported). But there's a cleaner ADB fix if you can connect once:
+2. **Display's stock firmware doesn't auto-DHCP eth0 on boot** (confirming what others have reported re: Vol+/Vol-). Even after the TP-Link is bridged, the Android `EthernetService` gets stuck in `OBTAINING_IPADDR` forever. The cleanest fix:
 
 ```
 adb shell ifconfig eth0 down
 adb shell ifconfig eth0 up
 ```
 
-That re-triggers Android's EthernetService which then actually requests DHCP and populates Android's ConnectivityManager with real link properties. Without this, apps get ENETUNREACH because ConnectivityManager has stale/empty info even though the kernel route table is fine.
-
-Also: on a slow WiFi bridge (mine's 100-1400ms latency), you need to bump the socket read timeout in the OpenDisplay client — 60s isn't enough to transfer a 777KB image.
+That re-triggers Android's ethernet init, which successfully DHCPs and populates `ConnectivityManager` with real link properties. Without it, apps get `ENETUNREACH` because Android's connectivity stack has stale/empty info even though the kernel route table is fine.
 
 # ===== POST 5: Patching the OpenDisplay APK =====
 
-**🧱 Gotcha #4: OpenDisplay Android app is mDNS-only, no manual server config**
+🧱 **Gotcha 4: OpenDisplay Android app is mDNS-only, so I patched the APK**
 
-The app (v0.1.3) uses Android NsdManager for discovery — no UI or prefs for a static server IP. That's fine when your display is on the same L2 segment as the server, but mine sits behind a WiFi bridge and multicast just doesn't traverse reliably.
+The OpenDisplay Android app (v0.1.3) discovers servers via Android `NsdManager` only — no UI or prefs for a static server IP. Fine on a flat LAN, but the TP-Link WiFi bridge doesn't reliably pass multicast, so my display never found the server.
 
-So I patched the APK. The app's only 29KB — trivial to decompile with apktool, edit the smali, rebuild, and sign. My patch injects a hardcoded `ServerInfo("E-Newspaper", "192.168.1.72", 2446)` into `MdnsDiscovery.start()` right after the NSD discovery call, then fires `listener.onServerFound(info)` directly. The existing mDNS discovery keeps running alongside as a fallback.
+The APK is 29KB. I decompiled with `apktool`, made a handful of smali edits, rebuilt and signed with `jarsigner` (SHA256withRSA — SHA1 is disabled in modern JDK). Five patches total:
 
-I also bumped `READ_TIMEOUT_MS` from 60000 → 600000 (60s → 10min) for the slow WiFi bridge, since 777KB images over a lossy link can take a while.
+1. **Hardcoded server fallback** in `MdnsDiscovery.start()` — fire `listener.onServerFound(new ServerInfo("E-Newspaper", "192.168.1.72", 2446))` directly, in parallel with the real mDNS lookup.
+2. `READ_TIMEOUT_MS` 60s → 600s — the WiFi bridge latency averages ~1.4s per packet, 60s wasn't enough to receive a 777KB image.
+3. `MAX_FRAME_SIZE` 1MB → 8MB — so the client accepts raw PNGs (see next post).
+4. `BitmapFactory.decodeByteArray()` tried first in `renderImage()` before the library's 1bpp decoder.
+5. `postInvalidate(101)` after `setImageBitmap()` to force GC16 grayscale refresh mode.
 
-Minimal patch location: `smali/org/opendisplay/android/MdnsDiscovery.smali` at the end of `start()`:
+Happy to share the patched APK if anyone wants it — or the smali diffs if you'd rather build your own.
 
-```
-new-instance v0, Lorg/opendisplay/android/MdnsDiscovery$ServerInfo;
-const-string v1, "E-Newspaper (hardcoded)"
-const-string v2, "192.168.1.72"
-const/16 v3, 0x98e
-invoke-direct {v0, v1, v2, v3}, ...ServerInfo-><init>(...)
-iget-object v1, p0, ...->listener:...
-invoke-interface {v1, v0}, ...Listener->onServerFound(...)
-```
+# ===== POST 6: The grayscale rabbit hole =====
 
-Build with `apktool b`, sign with jarsigner + SHA256withRSA (SHA1 is deprecated in modern JDK), install with `adb install -r`.
+🧱 **Gotcha 5: OpenDisplay's 1bpp protocol + a 16-level grayscale display = no grayscale**
 
-Everything's in the repo. Happy to share the patched APK directly if anyone wants it rather than building their own. Huge thanks to @balloob for OpenDisplay itself and @onlynai for figuring out the WiFi card situation earlier!
+After everything else was working, the display was showing "pure black-and-white dither" instead of the smooth grayscale newsprint look I expected from a 42" e-ink panel with GC16 support.
+
+**Root cause:** The OpenDisplay WiFi protocol sends **1 bit per pixel**. That's all the Android client ever sees — literally pure black or pure white pixels in memory. Even if you force a GC16 refresh mode on the EPDC, there's no intermediate gray value for the waveform to render. The "grayscale" you get from Floyd–Steinberg dithering is a visual illusion that only holds at viewing distance.
+
+**Fix, for an Avalue EPD-42S specifically** (which has the patched `invalidate(int mode)` / `postInvalidate(int mode)` framework API):
+
+1. Server sends the **raw PNG bytes** on the wire instead of the library's 1bpp encoding.
+2. Patched APK tries `BitmapFactory.decodeByteArray()` first — Android natively decodes the PNG into a grayscale `Bitmap` with 256 gray levels.
+3. `imageView.setImageBitmap(bitmap)` followed by `imageView.postInvalidate(101)` — that mode code comes from decompiling Avalue's `Animation` demo app, where it's used for the "periodic GC16 ghost-cleanup" refresh.
+4. The EPDC driver sees real grayscale in the framebuffer and applies the GC16 waveform.
+
+Result: real 16-level grayscale newsprint on the display. Photos look like halftone print, text is antialiased, no visible pixel stipple at normal viewing distance. This was the biggest win of the project — everything else feels finished once the display stops shouting at you in pure 1-bit.
+
+Full details + patched smali in the repo. Absolutely worth doing if you want anything more than a Kindle-style "text and line art" look.
