@@ -17,14 +17,28 @@ import logging
 import shutil
 import subprocess
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 from PIL import Image
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 IMAGES_RAW = PROJECT_ROOT / "images" / "raw"
+
+# The NYT print PDF URL uses the print-edition date — i.e. the calendar
+# date in America/New_York at which the paper was (or will be) delivered.
+# When we're running in HKT afternoon, that's "today ET"; overnight ET
+# the next day's PDF is still uploading so "today ET" may 404 and we fall
+# back to yesterday.
+NY_TZ = ZoneInfo("America/New_York")
+
+# Idempotency marker: records which ET calendar date the currently-saved
+# the-new-york-times.webp corresponds to. Lets the retry ladder skip the
+# fetch+pdftoppm once the day's edition has been captured.
+FINAL_IMAGE_PATH = IMAGES_RAW / "the-new-york-times.webp"
+MARKER_PATH = IMAGES_RAW / "the-new-york-times.etdate"
 
 URL_TEMPLATE = "https://static01.nyt.com/images/{year}/{month}/{day}/nytfrontpage/scan.pdf"
 USER_AGENT = (
@@ -51,12 +65,33 @@ def _pdf_url(day: date) -> str:
     )
 
 
+def _current_et_date() -> date:
+    """Return today's calendar date in America/New_York."""
+    return datetime.now(NY_TZ).date()
+
+
+def _read_marker() -> date | None:
+    try:
+        return date.fromisoformat(MARKER_PATH.read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def _write_marker(d: date) -> None:
+    MARKER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    MARKER_PATH.write_text(d.isoformat())
+
+
 def download_nyt(target_day: date | None = None, dpi: int = DEFAULT_DPI) -> Path:
     """
     Download today's NYT front page PDF, rasterise it, and save as webp.
 
     If the requested day's PDF isn't available yet (NYT hasn't published the
     print edition), fall back to the previous day.
+
+    Idempotent: if the marker file says we already have the target ET
+    edition, returns the existing path without re-fetching. This lets the
+    launchd retry ladder re-run cheaply once the day's edition lands.
 
     Returns the path to the saved raw image.
     """
@@ -66,7 +101,18 @@ def download_nyt(target_day: date | None = None, dpi: int = DEFAULT_DPI) -> Path
             "or `apt install poppler-utils` on Linux."
         )
 
-    today = target_day or date.today()
+    today = target_day or _current_et_date()
+
+    # Short-circuit: we already have the target ET edition on disk.
+    existing = _read_marker()
+    if existing == today and FINAL_IMAGE_PATH.exists():
+        logger.info(
+            "NYT already have ET %s at %s — skipping fetch",
+            today,
+            FINAL_IMAGE_PATH,
+        )
+        return FINAL_IMAGE_PATH
+
     sess = _new_session()
 
     # Try today first, then yesterday — NYT's next-day PDF often isn't
@@ -117,13 +163,13 @@ def download_nyt(target_day: date | None = None, dpi: int = DEFAULT_DPI) -> Path
     # CMYK registration marks, filename, and price info, plus some
     # whitespace at the bottom. We find the actual content bounds by
     # scanning ink density row-by-row.
-    final_path = IMAGES_RAW / "the-new-york-times.webp"
     trimmed = _trim_print_bleed(rendered)
-    trimmed.save(final_path, format="JPEG", quality=92)
+    trimmed.save(FINAL_IMAGE_PATH, format="JPEG", quality=92)
     rendered.unlink(missing_ok=True)
     pdf_path.unlink(missing_ok=True)
-    logger.info("Saved %s (%s)", final_path, trimmed.size)
-    return final_path
+    _write_marker(candidate)
+    logger.info("Saved %s (%s) — marker=%s", FINAL_IMAGE_PATH, trimmed.size, candidate)
+    return FINAL_IMAGE_PATH
 
 
 def _trim_print_bleed(img_path: Path) -> Image.Image:

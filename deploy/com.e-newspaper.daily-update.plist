@@ -5,9 +5,19 @@
     <!--
         Daily newspaper update job.
 
-        Runs at 07:00 HKT every day:
+        Retry ladder at 14:30 / 15:30 / 16:30 / 17:30 HKT every day.
+        The NYT next-day print PDF uploads overnight ET, which lands
+        ~11:00–15:00 HKT same day — occasionally later on weekends. Four
+        attempts an hour apart catches the edition as soon as it appears;
+        nyt_scraper.py is idempotent (writes a the-new-york-times.etdate
+        marker after a successful fetch) so the later runs become no-ops
+        once the day's edition has been captured.
+
+        The pipeline each run:
           1. scraper.py downloads today's papers from frontpages.com
+             (and high-res sources for papers with dedicated scrapers)
           2. processor.py processes the chosen paper for the e-ink display
+
         The OpenDisplay server (separate launchd job) picks up the new
         images/current.png on its next client poll.
 
@@ -30,6 +40,20 @@
     <key>WorkingDirectory</key>
     <string>__INSTALL_DIR__</string>
 
+    <!--
+        launchd runs with a stripped-down PATH that does NOT include
+        /opt/homebrew/bin, so Homebrew-installed tools (pdftoppm from
+        poppler, in particular) are invisible. Without this block,
+        nyt_scraper silently falls back to the 600x800 frontpages.com
+        thumbnail. Don't remove this unless you also make the Python
+        code invoke pdftoppm by absolute path.
+    -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
     <key>ProgramArguments</key>
     <array>
         <string>/bin/sh</string>
@@ -38,14 +62,23 @@
     </array>
 
     <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>7</integer>
-        <key>Minute</key>
-        <integer>0</integer>
-    </dict>
+    <array>
+        <dict>
+            <key>Hour</key><integer>14</integer>
+            <key>Minute</key><integer>30</integer>
+        </dict>
+        <dict>
+            <key>Hour</key><integer>15</integer>
+            <key>Minute</key><integer>30</integer>
+        </dict>
+        <dict>
+            <key>Hour</key><integer>16</integer><key>Minute</key><integer>30</integer>
+        </dict>
+        <dict>
+            <key>Hour</key><integer>17</integer><key>Minute</key><integer>30</integer>
+        </dict>
+    </array>
 
-    <!-- Run again at 08:00 in case 07:00 missed (some papers update late) -->
     <key>RunAtLoad</key>
     <false/>
 
