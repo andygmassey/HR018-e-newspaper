@@ -16,3 +16,13 @@ launchd-*.err.log
 
 # OS
 .DS_Store
+
+# Secrets — belt-and-braces. The canonical location is outside the repo
+# at ~/.config/hr018/tplink.password, but ignore anything that looks
+# like a stray password file in-tree as well.
+*.password
+*.secret
+.config/
+secrets/
+.env
+.env.*
