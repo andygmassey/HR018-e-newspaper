@@ -10,6 +10,8 @@ images/raw/
 images/processed/
 images/current.png
 images/manifest.json
+images/status.json
+images/last-poll.txt
 *.log
 launchd-*.out.log
 launchd-*.err.log
