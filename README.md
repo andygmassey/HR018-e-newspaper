@@ -1,17 +1,16 @@
 # HR018 — E-Newspaper
 
 Daily newspaper front pages on a 42" Avalue **EPD-42S** monochrome e-ink
-display, driven by an always-on Mac running an OpenDisplay WiFi server.
+display, driven by an always-on Mac mini running an OpenDisplay WiFi server.
 
 Companion to **HR017 — 42 E-ink** (display hardware reverse-engineering,
 ADB notes, refresh-mode discovery, and the CoffeeETable build).
 
-Scraper runs every morning, downloads the chosen newspaper from
-[frontpages.com](https://www.frontpages.com/), processes it for the e-ink
-panel, and serves it via the
+The NYT front page is fetched as a high-resolution PDF, rasterised at
+200 DPI, and served via the
 [OpenDisplay](https://github.com/balloob/opendisplay-android) WiFi
-protocol. The display polls the server every 5 minutes and shows the
-latest image.
+protocol. The display polls the server every 5 minutes and renders the
+image in real 16-level grayscale on the e-ink panel.
 
 > Background: the EPD-42S is a 42" Android-based e-ink panel originally
 > sold by Avalue as a digital signage product. Several people on a
@@ -22,14 +21,21 @@ latest image.
 ## Architecture
 
 ```
-Backend host (always-on macOS)
-├── launchd → scraper.py → frontpages.com → images/raw/<slug>.webp
-├── launchd → processor.py → fits/dithers → images/current.png
-└── launchd → server.py → OpenDisplay WiFi server :2446 + mDNS
+Mac mini (always-on macOS)
+├── launchd (hourly) → scraper.py → NYT PDF → pdftoppm 200 DPI
+├── processor.py → fit/grayscale/rotate → images/current.png
+├── server.py → OpenDisplay WiFi server :2446 + mDNS
+├── watchdog.py → heartbeat monitor (every 5 min)
+├── tplink_admin.py → bridge status/reboot via admin UI
+└── tools/remote_shell.py → reverse shell listener for OTA management
 
-EPD-42S Display (LAN: Ethernet, or WiFi-to-Ethernet bridge)
-└── OpenDisplay WiFi Android app
-    └── discovers backend via mDNS, polls every 5 min, displays image
+TP-Link WR802N (Client mode bridge, WiFi-to-Ethernet)
+
+EPD-42S Display (Android 5.1.1, Ethernet via bridge)
+├── install-recovery.sh → DHCP retry + daemon startup at boot
+├── tp_watchdog.sh → auto-reboots bridge on connectivity loss
+├── display_remote.sh → reverse shell to Mac mini for OTA access
+└── OpenDisplay WiFi app → polls server, renders on e-ink panel
 ```
 
 ## Project layout
@@ -37,22 +43,29 @@ EPD-42S Display (LAN: Ethernet, or WiFi-to-Ethernet bridge)
 ```
 config.json                 selection strategy + display orientation
 src/
-    scraper.py              fetch newspaper images from frontpages.com
+    scraper.py              fetch newspaper images (dispatches to per-paper scrapers)
+    nyt_scraper.py          NYT high-res PDF scraper (200 DPI via pdftoppm)
     processor.py            resize/grayscale/letterbox for the display
-    server.py               OpenDisplay WiFi server
+    server.py               OpenDisplay WiFi server + heartbeat file
+    watchdog.py             pipeline health check (heartbeat freshness)
+    tplink_admin.py         TP-Link WR802N admin UI CLI (status / reboot)
 tests/
     test_e2e.py             smoke test that pretends to be the display
+tools/
+    remote_shell.py         reverse shell listener for OTA display management
 deploy/
     install.sh              one-shot installer (creates venv, loads launchd jobs)
     com.e-newspaper.server.plist           always-on server launchd job
-    com.e-newspaper.daily-update.plist     daily scraper+processor launchd job
+    com.e-newspaper.daily-update.plist     hourly scraper+processor launchd job
+    com.e-newspaper.watchdog.plist         pipeline watchdog launchd job
     DISPLAY_SETUP.md        how to set up the EPD-42S to talk to the server
 images/                     gitignored output directory
 ```
 
 ## Quick start (local development)
 
-You need Python 3.11+ (py-opendisplay requires it).
+You need Python 3.11+ (py-opendisplay requires it) and poppler
+(`brew install poppler` for `pdftoppm`).
 
 ```bash
 git clone https://github.com/<you>/e-newspaper.git
@@ -88,14 +101,14 @@ The installer:
 2. Installs dependencies
 3. Runs a smoke scrape to confirm the pipeline works
 4. Rewrites the launchd plist paths to match the install location
-5. Loads both launchd jobs (`com.e-newspaper.server` always-on, and
-   `com.e-newspaper.daily-update` at 07:00 daily)
+5. Loads launchd jobs (server always-on, scraper hourly, watchdog every 5 min)
 
 After install:
 
 ```bash
 tail -f server.log     # OpenDisplay server log
-tail -f scraper.log    # daily scrape/process log
+tail -f scraper.log    # scrape/process log
+tail -f watchdog.log   # watchdog log
 launchctl start com.e-newspaper.daily-update    # force a refresh now
 ```
 
@@ -110,7 +123,7 @@ Edit `config.json`:
 | `fixed`    | Always shows `fixed` |
 
 `orientation` is `portrait` by default (newspapers are tall, the e-ink
-panel is rendered as 2160×2880). Set to `landscape` to render 2880×2160
+panel is rendered as 2160x2880). Set to `landscape` to render 2880x2160
 instead.
 
 To list all the papers available on frontpages.com today:
@@ -130,24 +143,20 @@ server via mDNS and start polling automatically.
 
 ## Image source notes
 
-frontpages.com aggregates ~130 newspapers worldwide and updates them
-daily. Image resolution is limited (the public `@2x.webp` URLs are
-600×800 thumbnails) but on a 42" e-ink panel with Floyd–Steinberg
-dithering, headlines and body text remain readable.
+**New York Times** is the primary source — fetched as the public
+print-edition PDF from `static01.nyt.com` and rasterised at 200 DPI
+(~2442x4685 pixels). The scraper is ET-date idempotent: it checks a
+sidecar `.etdate` file and skips fetch+rasterise if today's edition
+is already stored.
+
+**frontpages.com** is the fallback for other papers — aggregates ~130
+newspapers worldwide at 600x800 webp thumbnails. Adequate for secondary
+papers but looks poor at 42" scale.
 
 **Not available on frontpages.com:** the major UK national broadsheets
-(Guardian, Times, Telegraph, Daily Mail, Independent). Available
-UK-relevant titles include:
-
-- Financial Times ✓
-- South China Morning Post ✓
-- City AM, Yorkshire Post, Morning Star
-- Various regional papers (Manchester Evening News, Liverpool Echo, etc.)
-- The Irish Times
-
-For higher fidelity or for the missing UK titles you'd need a different
-source — PressReader (free with many public library cards) or direct
-PDF editions from the publishers. PRs welcome.
+(Guardian, Times, Telegraph, Daily Mail, Independent). For those, the
+path forward is PressReader access via a public library card or building
+per-publisher high-res scrapers.
 
 ## Credits
 
