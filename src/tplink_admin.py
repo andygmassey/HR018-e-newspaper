@@ -157,12 +157,55 @@ def _authenticate(session: requests.Session, router: str, password: str) -> str:
     return html
 
 
-def _parse_status(html: str) -> dict:
-    """Extract what we can from the authenticated dashboard HTML.
+def _parse_js_array(html: str, name: str) -> list:
+    """Extract a `var <name> = new Array(...);` declaration from the page.
 
-    WR802N firmware shows different dashboards depending on Operation
-    Mode. We scan for known markers and return a dict of whatever we
-    find; missing fields just stay absent. Best-effort.
+    WR802N's admin pages stuff all the useful state into top-of-HTML JS
+    arrays (statusPara, lanPara, wlanPara, wanPara, etc). Values are a
+    mix of bare integers and double-quoted strings, comma separated,
+    with a trailing ", 0, 0 );" sentinel. Returns a python list of
+    strings and ints, without the trailing sentinel.
+    """
+    # Non-greedy to stop at the first closing paren
+    m = re.search(
+        rf"var\s+{re.escape(name)}\s*=\s*new\s+Array\s*\((.*?)\)\s*;",
+        html,
+        re.DOTALL,
+    )
+    if not m:
+        return []
+    body = m.group(1)
+    # Tokenise: "quoted strings" or bare tokens separated by commas
+    tokens = re.findall(r'"([^"]*)"|([^,\s]+)', body)
+    values: list = []
+    for q, b in tokens:
+        if q or not b:
+            values.append(q)
+        else:
+            try:
+                values.append(int(b))
+            except ValueError:
+                values.append(b)
+    # Drop the trailing 0, 0 sentinel the firmware always appends
+    while len(values) >= 2 and values[-1] == 0 and values[-2] == 0:
+        values.pop()
+        values.pop()
+        # Break after one pair so we don't eat legitimate trailing zeros
+        break
+    return values
+
+
+def _parse_status(html: str) -> dict:
+    """Extract structured state from StatusRpm.htm's JS arrays.
+
+    The WR802N's Chinese firmware 1.0.9 (verified 2026-04-12) exposes:
+
+        statusPara = [int, int, int, int, int, "firmware", "hardware", ...]
+        lanPara    = ["MAC", "IP", "mask"]
+        wlanPara   = [up, "SSID", ..., "MAC", "IP", ..., channel, ...]
+        wanPara    = [linkMode, "ip", "mask", ...]   (all empty in pure
+                                                      bridge mode where
+                                                      no WAN is configured)
     """
     status: dict = {}
 
@@ -170,58 +213,74 @@ def _parse_status(html: str) -> dict:
     if m:
         status["page_title"] = m.group(1).strip()
 
-    # Operation mode tell-tales — Chinese firmware uses mixed labels.
-    mode_markers = {
-        "WISP / Client Router": ["WISP", "Client Router", "客户端路由"],
-        "AP Router": ["AP Router", "接入点路由"],
-        "Pure Client": ["Client Mode", "客户端模式"],
-        "WDS Bridge": ["WDS", "桥接"],
-        "AP": ["Access Point Mode"],
-    }
-    for mode, tokens in mode_markers.items():
-        if any(t in html for t in tokens):
-            status.setdefault("detected_modes", []).append(mode)
+    statusPara = _parse_js_array(html, "statusPara")
+    if len(statusPara) >= 7:
+        fw = str(statusPara[5]).strip()
+        hw = str(statusPara[6]).strip()
+        if fw:
+            status["firmware"] = fw
+        if hw:
+            status["hardware"] = hw
 
-    # WAN IP markers — these vary wildly by firmware/language; best effort
-    for pattern, label in [
-        (r"WAN\s*IP[^0-9]*(\d+\.\d+\.\d+\.\d+)", "wan_ip"),
-        (r'wanPara\.IpAddr\s*=\s*"(\d+\.\d+\.\d+\.\d+)"', "wan_ip_js"),
-        (r"IP\s*地址[^0-9]*(\d+\.\d+\.\d+\.\d+)", "wan_ip_zh"),
-    ]:
-        m = re.search(pattern, html)
-        if m:
-            status[label] = m.group(1)
+    lanPara = _parse_js_array(html, "lanPara")
+    if len(lanPara) >= 3:
+        status["lan_mac"] = lanPara[0]
+        status["lan_ip"] = lanPara[1]
+        status["lan_mask"] = lanPara[2]
 
-    # Wireless association status
-    for pattern, label in [
-        (r"Wireless.*?(Connected|Disconnected)", "wlan_state"),
-        (r"无线状态[^<]*(已连接|未连接|断开)", "wlan_state_zh"),
-    ]:
-        m = re.search(pattern, html)
-        if m:
-            status[label] = m.group(1)
+    wlanPara = _parse_js_array(html, "wlanPara")
+    if len(wlanPara) >= 6:
+        # [0]=up? [1]=SSID [4]=MAC [5]=IP
+        status["wlan_up"] = bool(wlanPara[0])
+        status["wlan_ssid"] = wlanPara[1]
+        status["wlan_mac"] = wlanPara[4]
+        status["wlan_ip"] = wlanPara[5]
+
+    wanPara = _parse_js_array(html, "wanPara")
+    # In pure bridge mode wanPara is all zeros/empty strings and
+    # conveys nothing useful; only report it if something's in it.
+    if wanPara and any(str(v).strip() for v in wanPara if v != 0):
+        status["wan_raw"] = wanPara
+
+    # Operation mode inference:
+    # - wanPara empty → pure bridge (LAN and WLAN share MAC/IP)
+    # - wanPara populated → routed/WISP mode with separate WAN
+    if lanPara and wlanPara and len(lanPara) >= 3 and len(wlanPara) >= 6:
+        if lanPara[0] == wlanPara[4] and lanPara[1] == wlanPara[5]:
+            status["mode_inferred"] = "bridge (LAN and WLAN share MAC/IP)"
+        else:
+            status["mode_inferred"] = "routed (LAN and WLAN differ)"
 
     return status
+
+
+def _fetch_status_page(session: requests.Session, router: str) -> str:
+    """Fetch the actual status page. The root URL returns a frameset
+    shell; the useful content lives at /userRpm/StatusRpm.htm."""
+    r = session.get(
+        router + "/userRpm/StatusRpm.htm",
+        headers={"Referer": router + "/"},
+        timeout=TIMEOUT,
+    )
+    r.raise_for_status()
+    return r.text
 
 
 def cmd_status(args: argparse.Namespace) -> int:
     password = _load_password(args.password_file)
     with requests.Session() as session:
-        html = _authenticate(session, args.router, password)
+        _authenticate(session, args.router, password)
+        html = _fetch_status_page(session, args.router)
     status = _parse_status(html)
     if not status:
         print(
-            "authenticated OK — dashboard fetched, but no known markers "
-            "matched. Dump the raw HTML with --dump-html to add new "
-            "parsers."
+            "authenticated OK — fetched StatusRpm.htm, but no known "
+            "markers matched. Dump with --dump-html to inspect."
         )
-        if args.dump_html:
-            print("--- raw HTML ---")
-            print(html)
-        return 0
-    print("TP-Link admin dashboard:")
-    for k, v in status.items():
-        print(f"  {k}: {v}")
+    else:
+        print("TP-Link admin dashboard:")
+        for k, v in status.items():
+            print(f"  {k}: {v}")
     if args.dump_html:
         print("--- raw HTML ---")
         print(html)
@@ -238,42 +297,41 @@ def cmd_reboot(args: argparse.Namespace) -> int:
     password = _load_password(args.password_file)
     with requests.Session() as session:
         _authenticate(session, args.router, password)
-        # WR802N Chinese firmware reboot endpoint — common across
-        # TL-WR802N / WR702N / WR706N Chinese builds. We try the
-        # Chinese-locale path first, then fall back to English-locale.
-        # The GET form works on WR802N; POST works on newer firmware.
-        # Referer is required by some firmware.
-        headers = {"Referer": args.router + "/"}
-        candidates = [
-            f"{args.router}/userRpm/SysRebootRpm.htm?Reboot=%D6%D8%C6%F4%C2%B7%D3%C9%C6%F7",
-            f"{args.router}/userRpm/SysRebootRpm.htm?Reboot=Reboot",
-            f"{args.router}/userRpm/SysRebootRpm.htm?Reboot=1",
-        ]
-        for url in candidates:
-            logger.info("Trying reboot endpoint: %s", url.split("?")[0])
-            try:
-                r = session.get(url, headers=headers, timeout=TIMEOUT)
-                if r.status_code == 200 and not _is_login_page(r.text):
-                    print(
-                        "Reboot command accepted. The TP-Link will be "
-                        "down for ~30-60 seconds while it restarts. "
-                        "The watchdog will flip to UNHEALTHY during "
-                        "this window and back to healthy once the "
-                        "display resumes polling."
-                    )
-                    return 0
-            except requests.RequestException:
-                # Connection may drop as the router reboots — that's
-                # actually a success signal. Fall through and report.
-                print(
-                    "Reboot command sent; connection dropped as "
-                    "expected (TP-Link is restarting)."
-                )
-                return 0
+        # WR802N Chinese firmware 1.0.9 verified 2026-04-12 at
+        # SysRebootRpm.htm. The form is method="get" action="SysRebootRpm.htm"
+        # with one submit input name="Reboot" whose value is the gb2312-
+        # encoded Chinese button label "重启路由器" (Reboot Router).
+        # URL-encoded = %D6%D8%C6%F4%C2%B7%D3%C9%C6%F7.
+        url = (
+            f"{args.router}/userRpm/SysRebootRpm.htm"
+            f"?Reboot=%D6%D8%C6%F4%C2%B7%D3%C9%C6%F7"
+        )
+        logger.info("POSTing reboot to /userRpm/SysRebootRpm.htm")
+        try:
+            r = session.get(
+                url,
+                headers={"Referer": f"{args.router}/userRpm/SysRebootRpm.htm"},
+                timeout=TIMEOUT,
+            )
+        except requests.RequestException:
+            # Connection dropping mid-request as the TP-Link begins
+            # rebooting is actually a success signal.
+            print(
+                "Reboot command sent; connection dropped as the "
+                "TP-Link begins its restart."
+            )
+            return 0
+        if r.status_code == 200 and not _is_login_page(r.text):
+            print(
+                "Reboot command accepted. The TP-Link will be "
+                "down for ~30-60 seconds. The watchdog will flip "
+                "to UNHEALTHY during this window and back to "
+                "healthy once the display resumes polling."
+            )
+            return 0
         raise SystemExit(
-            "None of the known reboot endpoints worked. Dump the "
-            "admin UI with `status --dump-html` and look for the "
-            "reboot form action to add the correct URL."
+            f"Reboot endpoint returned HTTP {r.status_code} and "
+            "unexpected content. Dump with --dump-html to debug."
         )
 
 

@@ -61,23 +61,21 @@
         <string>.venv/bin/python src/scraper.py &gt;&gt; scraper.log 2&gt;&amp;1 &amp;&amp; .venv/bin/python src/processor.py &gt;&gt; scraper.log 2&gt;&amp;1</string>
     </array>
 
-    <key>StartCalendarInterval</key>
-    <array>
-        <dict>
-            <key>Hour</key><integer>14</integer>
-            <key>Minute</key><integer>30</integer>
-        </dict>
-        <dict>
-            <key>Hour</key><integer>15</integer>
-            <key>Minute</key><integer>30</integer>
-        </dict>
-        <dict>
-            <key>Hour</key><integer>16</integer><key>Minute</key><integer>30</integer>
-        </dict>
-        <dict>
-            <key>Hour</key><integer>17</integer><key>Minute</key><integer>30</integer>
-        </dict>
-    </array>
+    <!--
+        Fire every hour (3600 seconds). StartInterval is timezone-
+        independent, unlike StartCalendarInterval which on this Mac
+        mini has been observed caching PDT despite the system being
+        set to Asia/Hong_Kong — the original 14:30-17:30 HKT schedule
+        was actually firing at 05:30-08:30 HKT (14:30-17:30 PDT offset
+        by 9 hours). Rather than hack the hours to account for the
+        cached TZ, just fire hourly: the scraper is idempotent (NYT
+        via the etdate marker, frontpages.com is cheap), so the bulk
+        of runs are ~3s no-ops. Cost is minor log spam; benefit is
+        catching a fresh NYT within an hour of upload regardless of
+        what TZ launchd thinks it's in.
+    -->
+    <key>StartInterval</key>
+    <integer>3600</integer>
 
     <key>RunAtLoad</key>
     <false/>
