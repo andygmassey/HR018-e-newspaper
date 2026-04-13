@@ -176,6 +176,7 @@ HIRES_SCRAPERS = {
     "the-guardian": ("pressreader_scraper", "download_pressreader"),
     "the-washington-post": ("wp_scraper", "download_wp"),
     "financial-times": ("ft_scraper", "download_ft"),
+    "los-angeles-times": ("lat_scraper", "download_lat"),
 }
 
 
@@ -219,6 +220,7 @@ def main(argv: list[str]) -> int:
         "financial-times",
         "south-china-morning-post",
         "the-guardian",
+        "los-angeles-times",
         "the-new-york-times",
         "the-washington-post",
         "the-globe-and-mail",

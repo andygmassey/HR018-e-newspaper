@@ -46,54 +46,67 @@ def _new_session() -> requests.Session:
     return sess
 
 
-def _find_frontpage_tweet_id(sess: requests.Session) -> str | None:
-    """Find the latest FT front page tweet ID via Nitter RSS."""
+def _find_frontpage_tweet_ids(sess: requests.Session) -> list[str]:
+    """Find recent FT front page tweet IDs via Nitter RSS.
+
+    Returns multiple candidates (newest first) so the caller can
+    skip tweets that contain videos instead of photos.
+    """
     for base in NITTER_INSTANCES:
         url = f"{base}/FT/rss"
         try:
             r = sess.get(url, timeout=15)
             if r.status_code != 200:
                 continue
-            # Look for tweets containing "front page" — extract the tweet URL
-            # Nitter RSS has <link> elements like https://nitter.net/FT/status/1234567890
-            matches = re.findall(r'/FT/status/(\d+)', r.text)
-            # Also get the tweet text to filter for front page posts
             items = re.findall(
                 r'<item>.*?<link>(.*?)</link>.*?<description>(.*?)</description>.*?</item>',
                 r.text, re.DOTALL
             )
+            # Front page tweets first, then any tweet as fallback
+            frontpage_ids = []
+            other_ids = []
             for link, desc in items:
+                m = re.search(r'/status/(\d+)', link)
+                if not m:
+                    continue
                 if 'front page' in desc.lower():
-                    m = re.search(r'/status/(\d+)', link)
-                    if m:
-                        return m.group(1)
-            # If no "front page" match, try the first tweet with an image
-            if matches:
-                return matches[0]
+                    frontpage_ids.append(m.group(1))
+                else:
+                    other_ids.append(m.group(1))
+            if frontpage_ids or other_ids:
+                return frontpage_ids + other_ids
         except Exception:
             logger.debug("Nitter instance %s failed", base)
             continue
-    return None
+    return []
 
 
 def _get_image_url(sess: requests.Session, tweet_id: str) -> str | None:
-    """Get the full-res image URL from a tweet via fxtwitter API."""
+    """Get the full-res PHOTO URL from a tweet via fxtwitter API.
+
+    Only returns static image URLs (pbs.twimg.com). Rejects videos
+    (video.twimg.com) — the @FT account sometimes posts video content
+    that is NOT the front page.
+    """
     url = FXTWITTER_API.format(tweet_id=tweet_id)
     try:
         r = sess.get(url, timeout=15)
         if r.status_code != 200:
             return None
         data = r.json()
-        # Navigate: tweet.media.all[0].url or tweet.media.photos[0].url
         tweet = data.get("tweet", {})
         media = tweet.get("media", {})
-        photos = media.get("photos", media.get("all", []))
-        if photos and len(photos) > 0:
-            img_url = photos[0].get("url", "")
-            # Ensure we get the original resolution
-            if "pbs.twimg.com" in img_url and "name=" not in img_url:
+        # Use photos specifically, NOT all (which includes videos)
+        photos = media.get("photos", [])
+        for photo in photos:
+            img_url = photo.get("url", "")
+            # Only accept pbs.twimg.com (static images), reject video.twimg.com
+            if "pbs.twimg.com" not in img_url:
+                continue
+            # Request original resolution
+            if "name=" not in img_url:
                 img_url += "?name=orig"
-            elif "name=" in img_url:
+            else:
                 img_url = re.sub(r'name=\w+', 'name=orig', img_url)
             return img_url
     except Exception:
@@ -105,15 +118,22 @@ def download_ft() -> Path:
     """Download today's FT front page from Twitter."""
     sess = _new_session()
 
-    logger.info("Searching for latest FT front page tweet...")
-    tweet_id = _find_frontpage_tweet_id(sess)
-    if not tweet_id:
-        raise RuntimeError("Could not find FT front page tweet via Nitter RSS")
+    logger.info("Searching for latest FT front page tweets...")
+    tweet_ids = _find_frontpage_tweet_ids(sess)
+    if not tweet_ids:
+        raise RuntimeError("Could not find FT front page tweets via Nitter RSS")
 
-    logger.info("Found tweet %s, fetching image URL via fxtwitter...", tweet_id)
-    img_url = _get_image_url(sess, tweet_id)
+    # Try each candidate until we find one with a photo (not a video)
+    img_url = None
+    for tweet_id in tweet_ids:
+        logger.info("Trying tweet %s...", tweet_id)
+        img_url = _get_image_url(sess, tweet_id)
+        if img_url:
+            break
+        logger.info("Tweet %s has no photo, trying next", tweet_id)
+
     if not img_url:
-        raise RuntimeError(f"Could not extract image URL from tweet {tweet_id}")
+        raise RuntimeError(f"No tweets with photos found among {len(tweet_ids)} candidates")
 
     logger.info("Downloading FT front page: %s", img_url[:80])
     r = sess.get(img_url, timeout=30)

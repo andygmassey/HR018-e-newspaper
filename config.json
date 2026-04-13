@@ -7,7 +7,8 @@
         {"from": "06:00", "paper": "south-china-morning-post"},
         {"from": "13:00", "paper": "the-guardian"},
         {"from": "15:00", "paper": "financial-times"},
-        {"from": "17:00", "paper": "the-new-york-times"}
+        {"from": "17:00", "paper": "the-new-york-times"},
+        {"from": "21:00", "paper": "los-angeles-times"}
     ],
 
     "_weekday_map_comment": "0=Monday .. 6=Sunday. Used when selection='weekday'",
