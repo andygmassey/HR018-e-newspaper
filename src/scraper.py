@@ -171,26 +171,33 @@ def save_manifest(manifest: dict) -> None:
 # The main() function will try these first and fall back to the generic
 # frontpages.com scraper if they fail.
 HIRES_SCRAPERS = {
-    "the-new-york-times": "nyt_scraper",
+    "the-new-york-times": ("nyt_scraper", "download_nyt"),
+    "south-china-morning-post": ("pressreader_scraper", "download_pressreader"),
+    "the-guardian": ("pressreader_scraper", "download_pressreader"),
+    "the-washington-post": ("wp_scraper", "download_wp"),
+    "financial-times": ("ft_scraper", "download_ft"),
 }
 
 
 def _run_hires(slug: str) -> bool:
     """Attempt to fetch a high-res version of `slug`. Returns True on success."""
-    module_name = HIRES_SCRAPERS.get(slug)
-    if not module_name:
+    entry = HIRES_SCRAPERS.get(slug)
+    if not entry:
         return False
+    module_name, func_name = entry
     try:
         import importlib
         mod = importlib.import_module(module_name)
-        if slug == "the-new-york-times":
-            mod.download_nyt()
-            return True
-        # Future: other per-paper hi-res scrapers go here
+        func = getattr(mod, func_name)
+        # PressReader scraper needs the slug to look up the CID
+        if module_name == "pressreader_scraper":
+            func(slug)
+        else:
+            func()
+        return True
     except Exception:
         logger.exception("High-res scraper %s for %s failed — falling back", module_name, slug)
         return False
-    return False
 
 
 def main(argv: list[str]) -> int:
@@ -211,6 +218,7 @@ def main(argv: list[str]) -> int:
     default_slugs = [
         "financial-times",
         "south-china-morning-post",
+        "the-guardian",
         "the-new-york-times",
         "the-washington-post",
         "the-globe-and-mail",
