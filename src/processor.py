@@ -118,6 +118,7 @@ def process_image(
     orientation: str = DEFAULT_ORIENTATION,
     fit_mode: str = "contain",
     rotation: int = 0,
+    margin: int = 0,
 ) -> Image.Image:
     """
     Resize and dither a newspaper image for the e-ink display.
@@ -126,18 +127,12 @@ def process_image(
         src_path: Source webp/png/jpg.
         out_path: Where to write the processed PNG.
         orientation: "landscape" (2880x2160) or "portrait" (2160x2880).
-                     This is the orientation at which the newspaper content
-                     is composed — usually "portrait" since newspapers are
-                     taller than wide.
-        fit_mode: "contain" letterboxes (preserves entire page);
-                  "cover" crops to fill (loses some edges).
-        rotation: Final clockwise rotation in degrees (0, 90, 180, 270)
-                  applied after fitting. Use this when the physical display
-                  is mounted in a different orientation than the content.
-                  For example, render portrait content at 2160x2880 then
-                  rotate 90 to get a 2880x2160 landscape image that reads
-                  correctly on a physically landscape-mounted display held
-                  sideways.
+        fit_mode: "contain" (letterbox), "cover" (center-crop),
+                  "cover_top" (fill, anchor top, crop bottom).
+        rotation: Final clockwise rotation in degrees (0/90/180/270).
+        margin: White border in pixels on all sides. The newspaper is
+                fitted into the remaining area after the margin is
+                subtracted. At 240 DPI, 300px ≈ 1.25 inches.
 
     Returns the final PIL Image.
     """
@@ -151,43 +146,48 @@ def process_image(
     # Convert to grayscale up front so resize works on luminance only
     img_gray = img.convert("L")
 
+    # Apply margin: fit the newspaper into the inner area, then paste
+    # onto the full-size canvas with white border.
+    inner_w = target_w - 2 * margin
+    inner_h = target_h - 2 * margin
+    if inner_w <= 0 or inner_h <= 0:
+        raise ValueError(f"margin={margin} is too large for {target_w}x{target_h}")
+
     src_w, src_h = img_gray.size
     src_aspect = src_w / src_h
-    target_aspect = target_w / target_h
+    inner_aspect = inner_w / inner_h
 
     if fit_mode == "contain":
-        # Scale to fit entirely within the target, with white background
-        if src_aspect > target_aspect:
-            new_w = target_w
-            new_h = round(target_w / src_aspect)
+        if src_aspect > inner_aspect:
+            new_w = inner_w
+            new_h = round(inner_w / src_aspect)
         else:
-            new_h = target_h
-            new_w = round(target_h * src_aspect)
+            new_h = inner_h
+            new_w = round(inner_h * src_aspect)
 
         scaled = img_gray.resize((new_w, new_h), Image.LANCZOS)
-        # White background — feels more like real newsprint than black bars
         canvas = Image.new("L", (target_w, target_h), 255)
-        canvas.paste(scaled, ((target_w - new_w) // 2, (target_h - new_h) // 2))
+        paste_x = margin + (inner_w - new_w) // 2
+        paste_y = margin + (inner_h - new_h) // 2
+        canvas.paste(scaled, (paste_x, paste_y))
     elif fit_mode in ("cover", "cover_top"):
-        # Scale so the image fills the target completely, cropping overflow.
-        if src_aspect > target_aspect:
-            new_h = target_h
-            new_w = round(target_h * src_aspect)
+        if src_aspect > inner_aspect:
+            new_h = inner_h
+            new_w = round(inner_h * src_aspect)
         else:
-            new_w = target_w
-            new_h = round(target_w / src_aspect)
+            new_w = inner_w
+            new_h = round(inner_w / src_aspect)
 
         scaled = img_gray.resize((new_w, new_h), Image.LANCZOS)
-        # "cover" is a center crop; "cover_top" anchors the top and crops the
-        # bottom (useful for newspapers — preserves the masthead and lead
-        # headlines, trims the bottom columns).
         if fit_mode == "cover_top":
-            left = (new_w - target_w) // 2
+            left = (new_w - inner_w) // 2
             top = 0
         else:
-            left = (new_w - target_w) // 2
-            top = (new_h - target_h) // 2
-        canvas = scaled.crop((left, top, left + target_w, top + target_h))
+            left = (new_w - inner_w) // 2
+            top = (new_h - inner_h) // 2
+        cropped = scaled.crop((left, top, left + inner_w, top + inner_h))
+        canvas = Image.new("L", (target_w, target_h), 255)
+        canvas.paste(cropped, (margin, margin))
     else:
         raise ValueError(f"Unknown fit_mode: {fit_mode!r}")
 
@@ -226,6 +226,7 @@ def process_today(config: dict | None = None) -> Path:
         orientation=config.get("orientation", DEFAULT_ORIENTATION),
         fit_mode=config.get("fit_mode", "contain"),
         rotation=int(config.get("rotation", 0)),
+        margin=int(config.get("margin", 0)),
     )
 
     # Update current.png as a copy (not symlink — Android client may not handle symlinks)

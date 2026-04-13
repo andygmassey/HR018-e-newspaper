@@ -43,6 +43,9 @@
     "_rotation_comment": "Final clockwise rotation in degrees (0/90/180/270). Use when the physical display is mounted in a different orientation than the content is composed at. Current setup: portrait content on a physically landscape-mounted 42in display = 90.",
     "rotation": 90,
 
+    "_margin_comment": "White border in pixels on all sides. Physical DPI is ~86 (42 inch panel at 2880x2160), so 86px = 1 inch, 108px = 1.25 inches, 129px = 1.5 inches.",
+    "margin": 108,
+
     "_watchdog_comment": "Periodic pipeline health check. Reads the heartbeat file (images/last-poll.txt, touched by server.py on every display poll) and alerts if it's been stale for longer than threshold_seconds. Default 900s = 3 missed 5-minute polls.",
     "watchdog": {
         "threshold_seconds": 900
