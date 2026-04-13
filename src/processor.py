@@ -73,7 +73,19 @@ def load_config() -> dict:
 
 
 def choose_paper(config: dict, today: date | None = None) -> str:
-    """Pick which paper to display today."""
+    """Pick which paper to display right now.
+
+    Strategies:
+        fixed       — always the same paper
+        weekday     — one paper per weekday
+        rotate      — cycle through a list, one per day
+        time_of_day — different papers at different times of day (HKT).
+                      Config is a list of {"from": "HH:MM", "paper": "slug"}
+                      entries, checked in order. The last matching entry wins.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
     today = today or date.today()
     strategy = config.get("selection", "fixed")
 
@@ -85,6 +97,17 @@ def choose_paper(config: dict, today: date | None = None) -> str:
         rotation = config["rotation"]
         idx = today.toordinal() % len(rotation)
         return rotation[idx]
+    if strategy == "time_of_day":
+        now = datetime.now(ZoneInfo("Asia/Hong_Kong"))
+        current_minutes = now.hour * 60 + now.minute
+        schedule = config["time_of_day_schedule"]
+        chosen = schedule[0]["paper"]  # default to first entry
+        for entry in schedule:
+            h, m = entry["from"].split(":")
+            entry_minutes = int(h) * 60 + int(m)
+            if current_minutes >= entry_minutes:
+                chosen = entry["paper"]
+        return chosen
 
     raise ValueError(f"Unknown selection strategy: {strategy!r}")
 

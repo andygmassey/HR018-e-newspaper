@@ -1,6 +1,13 @@
 {
-    "_comment": "Selection strategy for which paper to display each day",
-    "selection": "weekday",
+    "_comment": "Selection strategy: 'fixed', 'weekday', 'rotate', or 'time_of_day'",
+    "selection": "time_of_day",
+
+    "_time_of_day_comment": "Papers rotate through the day (HKT). Each entry is a window starting at 'from'. SCMP for the morning, UK papers early afternoon (when they publish), NYT in the evening (when the US print edition lands). Papers without a dedicated hi-res scraper still use frontpages.com 600x800 thumbnails.",
+    "time_of_day_schedule": [
+        {"from": "06:00", "paper": "south-china-morning-post"},
+        {"from": "13:00", "paper": "financial-times"},
+        {"from": "17:00", "paper": "the-new-york-times"}
+    ],
 
     "_weekday_map_comment": "0=Monday .. 6=Sunday. Used when selection='weekday'",
     "weekday_map": {
