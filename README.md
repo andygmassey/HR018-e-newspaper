@@ -4,7 +4,8 @@ Daily newspaper front pages on a 42" Avalue **EPD-42S** monochrome e-ink
 display, driven by an always-on Mac mini running an OpenDisplay WiFi server.
 
 Companion to **HR017 — 42 E-ink** (display hardware reverse-engineering,
-ADB notes, refresh-mode discovery, and the CoffeeETable build).
+ADB system analysis, EPDC refresh-mode discovery, and the CoffeeETable build).
+See https://github.com/andygmassey/HR017-42-E-ink for complete hardware documentation.
 
 The NYT front page is fetched as a high-resolution PDF, rasterised at
 200 DPI, and served via the
@@ -12,11 +13,11 @@ The NYT front page is fetched as a high-resolution PDF, rasterised at
 protocol. The display polls the server every 5 minutes and renders the
 image in real 16-level grayscale on the e-ink panel.
 
-> Background: the EPD-42S is a 42" Android-based e-ink panel originally
-> sold by Avalue as a digital signage product. Several people on a
-> [Reddit thread](https://www.reddit.com/r/eink/comments/1rru7zd/) and
+> **Background:** the EPD-42S is a 42" Android 5.1.1 e-ink panel (2880×2160, 4:3 ratio) originally
+> sold by Avalue as a digital signage product. Uses E Ink VB3300-RBA Salt driving board.
+> Several people on a [Reddit thread](https://www.reddit.com/r/eink/comments/1rru7zd/) and
 > the associated Discord picked them up cheap second-hand without
-> instructions. This is one of the projects to come out of that.
+> instructions. This is one of the projects to come out of that community reverse-engineering effort.
 
 ## Architecture
 
@@ -68,8 +69,8 @@ You need Python 3.11+ (py-opendisplay requires it) and poppler
 (`brew install poppler` for `pdftoppm`).
 
 ```bash
-git clone https://github.com/<you>/e-newspaper.git
-cd e-newspaper
+git clone https://github.com/andygmassey/HR018-e-newspaper.git
+cd HR018-e-newspaper
 
 python3.11 -m venv .venv
 .venv/bin/pip install requests beautifulsoup4 Pillow \
@@ -91,8 +92,8 @@ python3.11 -m venv .venv
 ## Deploying to an always-on Mac
 
 ```bash
-git clone https://github.com/<you>/e-newspaper.git ~/projects/e-newspaper
-cd ~/projects/e-newspaper
+git clone https://github.com/andygmassey/HR018-e-newspaper.git ~/projects/HR018-e-newspaper
+cd ~/projects/HR018-e-newspaper
 ./deploy/install.sh
 ```
 
