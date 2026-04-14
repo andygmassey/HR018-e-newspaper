@@ -1,16 +1,18 @@
 # HR018 — E-Newspaper
 
-Daily newspaper front pages on a 42" Avalue **EPD-42S** monochrome e-ink
-display, driven by an always-on Mac mini running an OpenDisplay WiFi server.
+Daily newspaper front pages on a 42" Avalue EPD-42S monochrome e-ink display, driven by an always-on Mac mini running an OpenDisplay WiFi server.
 
-**Time-based newspaper rotation (Hong Kong time):**
+Time-based newspaper rotation (Hong Kong time):
 - **06:00** — South China Morning Post (SCMP)
-- **13:00** — The Guardian  
+- **13:00** — The Guardian
 - **15:00** — Financial Times
 - **17:00** — The New York Times
 - **21:00** — Los Angeles Times
 
 Each newspaper is fetched using dedicated high-resolution scrapers (NYT via direct PDF at 200 DPI, others via PressReader/direct sources), processed to grayscale, and served via the [OpenDisplay](https://github.com/balloob/opendisplay-android) WiFi protocol. The display polls the server every 5 minutes and renders in real 16-level grayscale on the e-ink panel.
+
+![Wall mounted e-ink display showing NYT front page](assets/display-wall-mount.jpg)
+![Close-up view of e-ink display](assets/display-close-up.jpg)
 
 > **Background:** the EPD-42S is a 42" Android 5.1.1 e-ink panel (2880×2160, 4:3 ratio) originally
 > sold by Avalue as a digital signage product. Uses E Ink VB3300-RBA Salt driving board.
