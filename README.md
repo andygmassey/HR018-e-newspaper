@@ -3,11 +3,14 @@
 Daily newspaper front pages on a 42" Avalue **EPD-42S** monochrome e-ink
 display, driven by an always-on Mac mini running an OpenDisplay WiFi server.
 
-The NYT front page is fetched as a high-resolution PDF, rasterised at
-200 DPI, and served via the
-[OpenDisplay](https://github.com/balloob/opendisplay-android) WiFi
-protocol. The display polls the server every 5 minutes and renders the
-image in real 16-level grayscale on the e-ink panel.
+**Time-based newspaper rotation (Hong Kong time):**
+- **06:00** — South China Morning Post (SCMP)
+- **13:00** — The Guardian  
+- **15:00** — Financial Times
+- **17:00** — The New York Times
+- **21:00** — Los Angeles Times
+
+Each newspaper is fetched using dedicated high-resolution scrapers (NYT via direct PDF at 200 DPI, others via PressReader/direct sources), processed to grayscale, and served via the [OpenDisplay](https://github.com/balloob/opendisplay-android) WiFi protocol. The display polls the server every 5 minutes and renders in real 16-level grayscale on the e-ink panel.
 
 > **Background:** the EPD-42S is a 42" Android 5.1.1 e-ink panel (2880×2160, 4:3 ratio) originally
 > sold by Avalue as a digital signage product. Uses E Ink VB3300-RBA Salt driving board.
@@ -140,20 +143,16 @@ server via mDNS and start polling automatically.
 
 ## Image source notes
 
-**New York Times** is the primary source — fetched as the public
-print-edition PDF from `static01.nyt.com` and rasterised at 200 DPI
-(~2442x4685 pixels). The scraper is ET-date idempotent: it checks a
-sidecar `.etdate` file and skips fetch+rasterise if today's edition
-is already stored.
+**High-resolution scrapers** are used for all the daily newspapers:
+- **New York Times** — Public print-edition PDF from `static01.nyt.com`, rasterised at 200 DPI (~2442x4685 pixels)
+- **South China Morning Post & The Guardian** — PressReader API via library card access
+- **Financial Times** — Direct high-resolution scraper
+- **Los Angeles Times** — Direct high-resolution scraper  
+- **Washington Post** — Direct high-resolution scraper (used in rotation/weekday modes)
 
-**frontpages.com** is the fallback for other papers — aggregates ~130
-newspapers worldwide at 600x800 webp thumbnails. Adequate for secondary
-papers but looks poor at 42" scale.
+All scrapers are ET-date idempotent with sidecar files to avoid re-fetching the same edition.
 
-**Not available on frontpages.com:** the major UK national broadsheets
-(Guardian, Times, Telegraph, Daily Mail, Independent). For those, the
-path forward is PressReader access via a public library card or building
-per-publisher high-res scrapers.
+**frontpages.com** serves as fallback for other papers — aggregates ~130 newspapers worldwide at 600×800 webp thumbnails. Used for papers without dedicated high-res scrapers in the rotation modes.
 
 ## Credits
 
