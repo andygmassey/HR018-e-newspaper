@@ -207,13 +207,49 @@ def process_image(
     return canvas
 
 
+def _is_likely_ad(src_path: Path, threshold: float = 0.55) -> bool:
+    """Check if an image looks like a full-page takeover ad.
+
+    Full-page ads (e.g. HSBC on SCMP) have a much higher dark-pixel
+    ratio (>55%) than a real newspaper front page (~25-40%).
+    """
+    try:
+        import numpy as np
+        img = Image.open(src_path).convert("L")
+        dark_ratio = (np.array(img) < 128).mean()
+        if dark_ratio > threshold:
+            logger.warning("%s looks like a full-page ad (dark=%.0f%%)", src_path.name, dark_ratio * 100)
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def process_today(config: dict | None = None) -> Path:
-    """Process today's chosen paper and update images/current.png."""
+    """Process today's chosen paper and update images/current.png.
+
+    If the chosen paper's image looks like a full-page ad, tries the
+    next paper in the time_of_day schedule instead.
+    """
     config = config or load_config()
     slug = choose_paper(config)
     logger.info("Today's paper: %s", slug)
 
     src = IMAGES_RAW / f"{slug}.webp"
+
+    # If the image looks like a full-page ad, try the next paper in the schedule
+    if src.exists() and _is_likely_ad(src):
+        schedule = config.get("time_of_day_schedule", [])
+        papers = [e["paper"] for e in schedule]
+        if slug in papers:
+            idx = papers.index(slug)
+            next_slug = papers[(idx + 1) % len(papers)]
+            next_src = IMAGES_RAW / f"{next_slug}.webp"
+            if next_src.exists():
+                logger.info("Skipping %s (ad detected), using %s instead", slug, next_slug)
+                slug = next_slug
+                src = next_src
+
     if not src.exists():
         raise FileNotFoundError(
             f"Raw image for '{slug}' not found at {src}. Run scraper.py first."
