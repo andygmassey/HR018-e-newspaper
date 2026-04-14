@@ -5,7 +5,6 @@ display, driven by an always-on Mac mini running an OpenDisplay WiFi server.
 
 Companion to **HR017 — 42 E-ink** (display hardware reverse-engineering,
 ADB system analysis, EPDC refresh-mode discovery, and the CoffeeETable build).
-See https://github.com/andygmassey/HR017-42-E-ink for complete hardware documentation.
 
 The NYT front page is fetched as a high-resolution PDF, rasterised at
 200 DPI, and served via the
