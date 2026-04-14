@@ -3,9 +3,6 @@
 Daily newspaper front pages on a 42" Avalue **EPD-42S** monochrome e-ink
 display, driven by an always-on Mac mini running an OpenDisplay WiFi server.
 
-Companion to **HR017 — 42 E-ink** (display hardware reverse-engineering,
-ADB system analysis, EPDC refresh-mode discovery, and the CoffeeETable build).
-
 The NYT front page is fetched as a high-resolution PDF, rasterised at
 200 DPI, and served via the
 [OpenDisplay](https://github.com/balloob/opendisplay-android) WiFi
