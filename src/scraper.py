@@ -173,7 +173,6 @@ def save_manifest(manifest: dict) -> None:
 HIRES_SCRAPERS = {
     "the-new-york-times": ("nyt_scraper", "download_nyt"),
     "south-china-morning-post": ("pressreader_scraper", "download_pressreader"),
-    "the-guardian": ("pressreader_scraper", "download_pressreader"),
     "the-washington-post": ("wp_scraper", "download_wp"),
     "financial-times": ("ft_scraper", "download_ft"),
     "los-angeles-times": ("lat_scraper", "download_lat"),
