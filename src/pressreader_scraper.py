@@ -36,7 +36,7 @@ USER_AGENT = (
 
 PAPERS = {
     "south-china-morning-post": 6150,
-    "the-guardian": 1020,
+    "the-guardian": 1022,
 }
 
 logger = logging.getLogger("pressreader_scraper")
