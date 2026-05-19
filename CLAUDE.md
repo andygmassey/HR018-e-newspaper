@@ -29,10 +29,17 @@ Mac mini "Massey" (192.168.1.72, always-on macOS)
 │   └── Touches images/last-poll.txt on every poll (heartbeat)
 ├── watchdog.py (every 5 min via launchd)
 │   └── Alerts when last-poll.txt stale > 900s
+├── auto_recover.py (always-on via launchd, port 9999)
+│   └── Accepts the display's reverse-shell dial-in (every 30s) and on
+│       each connection checks last-poll.txt freshness. Sends eth0
+│       bounce + app restart recipe when stale > 6 min; escalates to
+│       reboot when stale > 30 min. Cooldowns prevent hammering.
+│   └── Conflicts with tools/remote_shell.py – only one binds port 9999
 ├── tplink_admin.py
 │   └── Cookie auth to WR802N admin UI (status / reboot)
 └── tools/remote_shell.py
-    └── Listens on port 9999, accepts reverse shell from display
+    └── Manual reverse shell – stop auto_recover first to use:
+        launchctl unload ~/Library/LaunchAgents/com.e-newspaper.auto-recover.plist
 
 TP-Link TL-WR802N (Client mode, pure bridge, .253)
 ├── LAN + WLAN share MAC/IP — no NAT
@@ -98,7 +105,15 @@ python src/tplink_admin.py status
 python src/tplink_admin.py reboot
 
 # Start reverse shell listener (display connects to this)
+# NOTE: stop auto_recover first – both want port 9999
+launchctl unload ~/Library/LaunchAgents/com.e-newspaper.auto-recover.plist
 python tools/remote_shell.py
+
+# Restart auto_recover after manual debugging
+launchctl load ~/Library/LaunchAgents/com.e-newspaper.auto-recover.plist
+
+# Tail auto-recovery events
+tail -F auto-recover.err.log | grep -E "FIX|REBOOT"
 
 # Force a scrape+process cycle
 launchctl start com.e-newspaper.daily-update

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        Auto-recovery daemon for the e-ink display.
+
+        Pairs with src/watchdog.py (which only detects + alerts) by adding
+        an actual recovery path. Listens on TCP 9999 for the display's
+        reverse-shell dial-in. When the heartbeat is stale, sends the
+        eth0-bounce + app-restart recipe and (if that doesn't help)
+        eventually a reboot.
+
+        Install:
+          cp deploy/com.e-newspaper.auto-recover.plist ~/Library/LaunchAgents/
+          launchctl load ~/Library/LaunchAgents/com.e-newspaper.auto-recover.plist
+
+        Tail recovery events:
+          tail -F auto-recover.err.log | grep -E "FIX|REBOOT"
+
+        Stop temporarily (e.g. to use tools/remote_shell.py manually):
+          launchctl unload ~/Library/LaunchAgents/com.e-newspaper.auto-recover.plist
+
+        Note: deploy/install.sh rewrites __INSTALL_DIR__ before copying.
+    -->
+    <key>Label</key>
+    <string>com.e-newspaper.auto-recover</string>
+
+    <key>WorkingDirectory</key>
+    <string>__INSTALL_DIR__</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__INSTALL_DIR__/.venv/bin/python</string>
+        <string>-u</string>
+        <string>src/auto_recover.py</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__INSTALL_DIR__/auto-recover.log</string>
+    <key>StandardErrorPath</key>
+    <string>__INSTALL_DIR__/auto-recover.err.log</string>
+</dict>
+</plist>

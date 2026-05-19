@@ -84,7 +84,7 @@ fi
 
 # 6. Install launchd plists (rewriting paths to match this install)
 mkdir -p "$LAUNCH_DIR"
-for plist in com.e-newspaper.server com.e-newspaper.daily-update; do
+for plist in com.e-newspaper.server com.e-newspaper.daily-update com.e-newspaper.auto-recover; do
     src="$PROJECT_DIR/deploy/${plist}.plist"
     dst="$LAUNCH_DIR/${plist}.plist"
     echo "Installing $plist"
