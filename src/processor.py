@@ -225,6 +225,20 @@ def _is_likely_ad(src_path: Path, threshold: float = 0.55) -> bool:
     return False
 
 
+def _effective(config: dict, slug: str, key: str, default):
+    """Read a config value, preferring a per-paper override if present.
+
+    `paper_overrides: {"the-guardian": {"fit_mode": "contain"}}` lets one
+    paper deviate from the global setting when its source aspect ratio
+    doesn't suit the default `cover_top` (e.g. BBC photos of the Guardian
+    are wider than most other sources and get clipped left/right).
+    """
+    overrides = config.get("paper_overrides", {}).get(slug, {})
+    if key in overrides:
+        return overrides[key]
+    return config.get(key, default)
+
+
 def process_today(config: dict | None = None) -> Path:
     """Process today's chosen paper and update images/current.png.
 
@@ -259,10 +273,10 @@ def process_today(config: dict | None = None) -> Path:
     process_image(
         src,
         out,
-        orientation=config.get("orientation", DEFAULT_ORIENTATION),
-        fit_mode=config.get("fit_mode", "contain"),
-        rotation=int(config.get("rotation", 0)),
-        margin=int(config.get("margin", 0)),
+        orientation=_effective(config, slug, "orientation", DEFAULT_ORIENTATION),
+        fit_mode=_effective(config, slug, "fit_mode", "contain"),
+        rotation=int(_effective(config, slug, "rotation", 0)),
+        margin=int(_effective(config, slug, "margin", 0)),
     )
 
     # Update current.png as a copy (not symlink — Android client may not handle symlinks)
@@ -290,9 +304,10 @@ def main(argv: list[str]) -> int:
             process_image(
                 raw,
                 out,
-                orientation=config.get("orientation", DEFAULT_ORIENTATION),
-                fit_mode=config.get("fit_mode", "contain"),
-                rotation=int(config.get("rotation", 0)),
+                orientation=_effective(config, slug, "orientation", DEFAULT_ORIENTATION),
+                fit_mode=_effective(config, slug, "fit_mode", "contain"),
+                rotation=int(_effective(config, slug, "rotation", 0)),
+                margin=int(_effective(config, slug, "margin", 0)),
             )
         return 0
 
@@ -306,9 +321,10 @@ def main(argv: list[str]) -> int:
         process_image(
             src,
             out,
-            orientation=config.get("orientation", DEFAULT_ORIENTATION),
-            fit_mode=config.get("fit_mode", "contain"),
-            rotation=int(config.get("rotation", 0)),
+            orientation=_effective(config, slug, "orientation", DEFAULT_ORIENTATION),
+            fit_mode=_effective(config, slug, "fit_mode", "contain"),
+            rotation=int(_effective(config, slug, "rotation", 0)),
+            margin=int(_effective(config, slug, "margin", 0)),
         )
         shutil.copy2(out, CURRENT_IMAGE)
         return 0
