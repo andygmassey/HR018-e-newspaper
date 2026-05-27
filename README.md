@@ -28,13 +28,15 @@ Mac mini (always-on macOS)
 ├── processor.py → fit/grayscale/rotate → images/current.png
 ├── server.py → OpenDisplay WiFi server :2446 + mDNS
 ├── watchdog.py → heartbeat monitor (every 5 min)
+├── auto_recover.py → on stale heartbeat, sends recovery commands via :9999
 ├── tplink_admin.py → bridge status/reboot via admin UI
-└── tools/remote_shell.py → reverse shell listener for OTA management
+└── tools/remote_shell.py → manual reverse shell (use when auto_recover is unloaded)
 
 TP-Link WR802N (Client mode bridge, WiFi-to-Ethernet)
 
 EPD-42S Display (Android 5.1.1, Ethernet via bridge)
-├── install-recovery.sh → DHCP retry + daemon startup at boot
+├── install-recovery.sh → waits for eth0, then launches supervisor.sh at boot
+├── supervisor.sh → respawns dead daemons every 60s (the self-healing core)
 ├── tp_watchdog.sh → auto-reboots bridge on connectivity loss
 ├── display_remote.sh → reverse shell to Mac mini for OTA access
 └── OpenDisplay WiFi app → polls server, renders on e-ink panel
@@ -50,17 +52,21 @@ src/
     processor.py            resize/grayscale/letterbox for the display
     server.py               OpenDisplay WiFi server + heartbeat file
     watchdog.py             pipeline health check (heartbeat freshness)
+    auto_recover.py         heartbeat-driven recovery via the reverse-shell channel
+    bbc_guardian_scraper.py BBC News papers roundup scraper for Guardian
     tplink_admin.py         TP-Link WR802N admin UI CLI (status / reboot)
 tests/
     test_e2e.py             smoke test that pretends to be the display
 tools/
-    remote_shell.py         reverse shell listener for OTA display management
+    remote_shell.py         manual reverse shell (stop auto_recover.py first)
 deploy/
-    install.sh              one-shot installer (creates venv, loads launchd jobs)
-    com.e-newspaper.server.plist           always-on server launchd job
-    com.e-newspaper.daily-update.plist     hourly scraper+processor launchd job
-    com.e-newspaper.watchdog.plist         pipeline watchdog launchd job
-    DISPLAY_SETUP.md        how to set up the EPD-42S to talk to the server
+    install.sh                              one-shot installer (creates venv, loads launchd jobs)
+    com.e-newspaper.server.plist            always-on server launchd job
+    com.e-newspaper.daily-update.plist      hourly scraper+processor launchd job
+    com.e-newspaper.watchdog.plist          pipeline watchdog launchd job
+    com.e-newspaper.auto-recover.plist      always-on auto-recover daemon
+    DISPLAY_SETUP.md                        how to set up the EPD-42S to talk to the server
+    display/                                on-device shell scripts (supervisor + daemons + boot hook)
 images/                     gitignored output directory
 ```
 

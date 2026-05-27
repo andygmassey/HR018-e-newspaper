@@ -50,8 +50,12 @@ TP-Link TL-WR802N (Client mode, pure bridge, .253)
 
 EPD-42S Display (DHCP from Massey via bridge)
 ├── /system/bin/install-recovery.sh (boot hook)
-│   └── Retries DHCP 8 times
-│   └── Starts tp_watchdog.sh + display_remote.sh daemons
+│   └── Waits for eth0 IP (max 60s), then launches supervisor.sh
+├── /data/local/tmp/supervisor.sh
+│   └── Every 60s, respawns display_remote.sh + tp_watchdog.sh if dead.
+│   └── Without this, a single daemon crash takes the recovery loop
+│       offline until physical OS reboot (panel power-cycle is not enough,
+│       because Android keeps running through it).
 ├── /data/local/tmp/tp_watchdog.sh
 │   └── Pings Mac mini every 60s, reboots bridge after 3 failures
 ├── /data/local/tmp/display_remote.sh
