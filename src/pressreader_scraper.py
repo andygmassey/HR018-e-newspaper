@@ -7,9 +7,13 @@ authentication for some papers. The URL pattern is:
 
 Known CIDs:
     6150  South China Morning Post
-    1020  The Guardian (UK)
 
-Returns PNG images at ~2000×3000+ pixels — excellent for the e-ink display.
+Returns PNG images at ~2000x3000+ pixels, excellent for the e-ink display.
+
+Note: The Guardian is NOT here. Guardian UK left PressReader in Jan 2026
+(CID 1020 is frozen on a 2011 edition; a full CID sweep found no current
+Guardian anywhere on i.prcdn.co). Guardian now comes from BBC News via
+src/bbc_guardian_scraper.py.
 """
 from __future__ import annotations
 
@@ -36,7 +40,6 @@ USER_AGENT = (
 
 PAPERS = {
     "south-china-morning-post": 6150,
-    "the-guardian": 1022,
 }
 
 logger = logging.getLogger("pressreader_scraper")

@@ -3,20 +3,22 @@
 <plist version="1.0">
 <dict>
     <!--
-        Auto-recovery daemon for the e-ink display.
+        Display reachability monitor (detection / alerting only).
 
-        Pairs with src/watchdog.py (which only detects + alerts) by adding
-        an actual recovery path. Listens on TCP 9999 for the display's
-        reverse-shell dial-in. When the heartbeat is stale, sends the
-        eth0-bounce + app-restart recipe and (if that doesn't help)
-        eventually a reboot.
+        Listens on TCP 9999 for the display's reverse-shell dial-in and logs
+        whether the heartbeat (images/last-poll.txt) is fresh or stale. It
+        does NOT send recovery commands: active recovery is owned by the
+        display's own app_watchdog.sh (see deploy/display/), which detects
+        the app-layer ENETUNREACH condition locally and escalates to a full
+        reboot. This daemon used to send an eth0-bounce fix; repeated bounces
+        caused the 2026-06-06 outage, so recovery was moved on-device.
 
         Install:
           cp deploy/com.e-newspaper.auto-recover.plist ~/Library/LaunchAgents/
           launchctl load ~/Library/LaunchAgents/com.e-newspaper.auto-recover.plist
 
-        Tail recovery events:
-          tail -F auto-recover.err.log | grep -E "FIX|REBOOT"
+        Tail dial-ins / stale-heartbeat warnings:
+          tail -F auto-recover.err.log | grep -E "stale|healthy"
 
         Stop temporarily (e.g. to use tools/remote_shell.py manually):
           launchctl unload ~/Library/LaunchAgents/com.e-newspaper.auto-recover.plist

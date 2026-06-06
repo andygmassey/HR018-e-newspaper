@@ -2,11 +2,11 @@
     "_comment": "Selection strategy: 'fixed', 'weekday', 'rotate', or 'time_of_day'",
     "selection": "time_of_day",
 
-    "_time_of_day_comment": "Papers rotate through the day (HKT). Each entry is a window starting at 'from'. SCMP for the morning, UK papers early afternoon (when they publish), NYT in the evening (when the US print edition lands). Papers without a dedicated hi-res scraper still use frontpages.com 600x800 thumbnails.",
+    "_time_of_day_comment": "Papers rotate through the day (HKT). Each entry is a window starting at 'from', checked in order, last match wins. SCMP in the morning, Guardian early afternoon (BBC roundup of the day's UK print front pages), FT mid-afternoon, NYT in the evening (US print edition lands), LAT late.",
     "time_of_day_schedule": [
         {"from": "06:00", "paper": "south-china-morning-post"},
-        {"from": "13:00", "paper": "financial-times"},
-        {"from": "15:00", "paper": "the-washington-post"},
+        {"from": "13:00", "paper": "the-guardian"},
+        {"from": "15:00", "paper": "financial-times"},
         {"from": "17:00", "paper": "the-new-york-times"},
         {"from": "21:00", "paper": "los-angeles-times"}
     ],
@@ -22,8 +22,8 @@
         "6": "financial-times"
     },
 
-    "_rotation_comment": "Cycles through these one per day. Used when selection='rotate'",
-    "rotation": [
+    "_rotate_list_comment": "Cycles through these one per day. Used when selection='rotate'",
+    "rotate_list": [
         "south-china-morning-post",
         "financial-times",
         "the-new-york-times",
@@ -37,8 +37,13 @@
     "_orientation_comment": "landscape (2880x2160) or portrait (2160x2880). Newspapers fit better in portrait.",
     "orientation": "portrait",
 
-    "_fit_mode_comment": "contain (letterbox, preserve full page), cover (center-crop to fill), cover_top (fill edge-to-edge, anchor top, crop bottom — best for newspapers because it preserves the masthead)",
+    "_fit_mode_comment": "contain (letterbox, preserve full page), cover (center-crop to fill), cover_top (fill edge-to-edge, anchor top, crop bottom, best for newspapers because it preserves the masthead). Override per paper via paper_overrides.",
     "fit_mode": "cover_top",
+
+    "_paper_overrides_comment": "Per-paper override for any top-level setting (fit_mode, orientation, margin, rotation). Guardian uses contain because the BBC source photo is wider than the target inner aspect, so cover_top would clip the masthead and side teasers.",
+    "paper_overrides": {
+        "the-guardian": {"fit_mode": "contain"}
+    },
 
     "_rotation_comment": "Final clockwise rotation in degrees (0/90/180/270). Use when the physical display is mounted in a different orientation than the content is composed at. Current setup: portrait content on a physically landscape-mounted 42in display = 90.",
     "rotation": 90,

@@ -153,13 +153,12 @@ server via mDNS and start polling automatically.
 ## Image source notes
 
 **High-resolution scrapers** are used for all the daily newspapers:
-- **New York Times** — Public print-edition PDF from `static01.nyt.com`, rasterised at 200 DPI (~2442x4685 pixels)
-- **South China Morning Post & The Guardian** — PressReader API via library card access
-- **Financial Times** — Direct high-resolution scraper
-- **Los Angeles Times** — Direct high-resolution scraper  
-- **Washington Post** — Direct high-resolution scraper (used in rotation/weekday modes)
-
-All scrapers are ET-date idempotent with sidecar files to avoid re-fetching the same edition.
+- **New York Times**: public print-edition PDF from `static01.nyt.com`, rasterised at 200 DPI (~2442x4685 pixels). ET-date idempotent via a `.etdate` sidecar.
+- **The Guardian**: BBC News papers roundup (`bbc.co.uk/news/blogs/the_papers`), ichef CDN at `standard/2560` (~2560x3100). See `src/bbc_guardian_scraper.py`.
+- **South China Morning Post**: PressReader public CDN (`i.prcdn.co`)
+- **Financial Times**: direct high-resolution scraper
+- **Los Angeles Times**: direct high-resolution scraper
+- **Washington Post**: direct high-resolution scraper (used in rotation/weekday modes)
 
 **frontpages.com** serves as fallback for other papers — aggregates ~130 newspapers worldwide at 600×800 webp thumbnails. Used for papers without dedicated high-res scrapers in the rotation modes.
 

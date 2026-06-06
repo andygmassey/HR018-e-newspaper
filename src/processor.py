@@ -60,7 +60,7 @@ def load_config() -> dict:
             "5": "the-new-york-times",  # Saturday
             "6": "financial-times",  # Sunday (FT Weekend)
         },
-        "rotation": [
+        "rotate_list": [
             "south-china-morning-post",
             "financial-times",
             "the-new-york-times",
@@ -94,9 +94,9 @@ def choose_paper(config: dict, today: date | None = None) -> str:
     if strategy == "weekday":
         return config["weekday_map"][str(today.weekday())]
     if strategy == "rotate":
-        rotation = config["rotation"]
-        idx = today.toordinal() % len(rotation)
-        return rotation[idx]
+        rotate_list = config["rotate_list"]
+        idx = today.toordinal() % len(rotate_list)
+        return rotate_list[idx]
     if strategy == "time_of_day":
         now = datetime.now(ZoneInfo("Asia/Hong_Kong"))
         current_minutes = now.hour * 60 + now.minute
