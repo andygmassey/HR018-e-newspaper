@@ -9,9 +9,8 @@ can be redeployed via ADB.
 | File | Path on display | Started by | Purpose |
 | ---- | --------------- | ---------- | ------- |
 | `install-recovery.sh` | `/system/bin/install-recovery.sh` | `init.rc` (oneshot, class main) | Boot hook. Waits for eth0 IP, then launches `supervisor.sh`. |
-| `supervisor.sh` | `/data/local/tmp/supervisor.sh` | `install-recovery.sh` | Respawns `display_remote.sh`, `tp_watchdog.sh`, `app_watchdog.sh` every 60s if dead. |
-| `app_watchdog.sh` | `/data/local/tmp/app_watchdog.sh` | `supervisor.sh` | Detects app-layer network loss (ENETUNREACH) and recovers; reboots after 3 failed fixes. **Primary recovery.** |
-| `display_remote.sh` | `/data/local/tmp/display_remote.sh` | `supervisor.sh` | Reverse shell: dials Massey :9999 every 30s for OTA recovery. |
+| `supervisor.sh` | `/data/local/tmp/supervisor.sh` | `install-recovery.sh` | Respawns `display_remote.sh` and `tp_watchdog.sh` every 60s if dead. |
+| `display_remote.sh` | `/data/local/tmp/display_remote.sh` | `supervisor.sh` | Reverse shell: dials Massey :9999 every 30s. Recovery channel + OTA. |
 | `tp_watchdog.sh` | `/data/local/tmp/tp_watchdog.sh` | `supervisor.sh` | Pings Massey every 60s, reboots the TP-Link bridge after 3 failures. |
 
 ## Why a supervisor
@@ -27,36 +26,34 @@ channel is `display_remote.sh` dialing in.
 The supervisor closes that gap with a single shell `while true` loop that
 checks the process table every 60s and respawns dead daemons.
 
-## Why app_watchdog (the ENETUNREACH problem)
+## The ENETUNREACH failure (and where it is handled)
 
-Observed 2026-06-06: after a boot or network blip, Android's
-ConnectivityManager intermittently fails to register eth0 as the active
-default network *for apps*. eth0 is up at the kernel level (ping, nc, and
-the reverse shell all work from root), but apps get
-`ENETUNREACH (Network is unreachable)` and can never connect. The
-OpenDisplay app then connect-drops forever and the panel sticks on
-"waiting for server".
+Observed 2026-06: after a network blip, the OpenDisplay app's connect()
+fails with `ENETUNREACH (Network is unreachable)` even though Android's
+ConnectivityManager reports a healthy, validated default network. The app
+connect-drops forever and the panel sticks on "waiting for server".
 
-Two reasons nothing caught this before:
+Two things make this nasty:
 
-- `tp_watchdog.sh` checks connectivity with a root-level `nc`, which
-  bypasses the app network layer and always succeeds.
-- The Massey-side `auto_recover.py` could send a fix, but its only channel
-  is the reverse shell. Its old fix (repeated eth0 bounces) churned the
-  network until the reverse shell itself died, after which it went blind
-  and could never escalate to a reboot. Recovery then needed a physical
-  cold boot (full 30s DC unplug; the panel power button does NOT reboot
-  Android).
+- It cannot be self-detected on the display. `dumpsys connectivity` shows a
+  healthy validated network during the failure (an early fix attempt keyed
+  off `Active default network` and never fired, because that signal reads
+  "healthy" the whole time). `tp_watchdog.sh`'s root-level `nc` also passes,
+  because root networking works while only apps are broken.
+- A reboot does NOT fix it (a full 30s DC cold boot came up still broken).
+  The only reliable cure is: bounce eth0 (forces a fresh network agent),
+  then restart the app so it binds the new agent.
 
-`app_watchdog.sh` fixes this at the right layer. It keys off the causal
-signal, `dumpsys connectivity` → `Active default network: <id>`, which is
-exactly what determines whether apps get ENETUNREACH. When it is missing it
-bounces eth0 + restarts the app, and after 3 consecutive failures it does a
-full Android `reboot`. The reboot is the crucial piece the old design
-lacked: it runs locally and needs no network, so it recovers the display
-even when every remote channel is dead.
+Because the display can't detect it, recovery is driven from Massey, which
+*can* see it via the server heartbeat (`images/last-poll.txt`).
+`src/auto_recover.py` watches the heartbeat and, when it goes stale, sends
+the eth0-bounce + app-restart over the reverse shell. Critically it does
+this at most once per 15 min (then backs off to hourly after 3 tries):
+bouncing eth0 repeatedly is what wedged the network and killed the reverse
+shell during the 2026-06-06 outage, turning a blip into a 30-hour stall.
 
-`auto_recover.py` on Massey is now detection / alerting only.
+Manual one-shot of the same recovery: `python3 tools/fix_display.py` on
+Massey (stop auto_recover first to free port 9999).
 
 ## Deployment
 
@@ -69,11 +66,9 @@ adb shell 'mount -o remount,rw /system'
 
 # Push /data/local/tmp scripts
 adb push deploy/display/supervisor.sh     /data/local/tmp/supervisor.sh
-adb push deploy/display/app_watchdog.sh   /data/local/tmp/app_watchdog.sh
 adb push deploy/display/display_remote.sh /data/local/tmp/display_remote.sh
 adb push deploy/display/tp_watchdog.sh    /data/local/tmp/tp_watchdog.sh
 adb shell 'chmod 755 /data/local/tmp/supervisor.sh \
-                     /data/local/tmp/app_watchdog.sh \
                      /data/local/tmp/display_remote.sh \
                      /data/local/tmp/tp_watchdog.sh'
 
@@ -88,13 +83,13 @@ adb shell 'mount -o remount,ro /system' 2>/dev/null
 adb reboot
 adb wait-for-device
 adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 2; done'
-adb shell 'busybox ps w | busybox grep -E "supervisor|display_remote|tp_watchdog|app_watchdog" | busybox grep -v grep'
+adb shell 'busybox ps w | busybox grep -E "supervisor|display_remote|tp_watchdog" | busybox grep -v grep'
 ```
 
 Note: the scripts can also be deployed over the reverse shell without USB
-(base64-push through `display_remote.sh`'s dial-in), which is how the
-2026-06-06 app_watchdog rollout was done. USB is simplest for a from-scratch
-setup; the reverse shell is the no-touch path once the display is online.
+(base64-push through `display_remote.sh`'s dial-in). USB is simplest for a
+from-scratch setup; the reverse shell is the no-touch path once the display
+is online (stop auto_recover on Massey first to free port 9999).
 
 You should see all three processes within ~60s of boot.
 

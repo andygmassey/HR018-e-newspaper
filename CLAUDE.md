@@ -29,12 +29,16 @@ Mac mini "Massey" (192.168.1.72, always-on macOS)
 │   └── Touches images/last-poll.txt on every poll (heartbeat)
 ├── watchdog.py (every 5 min via launchd)
 │   └── Alerts when last-poll.txt stale > 900s
-├── auto_recover.py (always-on via launchd, port 9999): DETECTION ONLY
-│   └── Accepts the display's reverse-shell dial-in (every 30s) and logs
-│       whether last-poll.txt is fresh or stale. Does NOT send recovery
-│       commands: active recovery is owned by the display's app_watchdog.sh.
-│       (It used to send an eth0-bounce FIX; repeated bounces caused the
-│       2026-06-06 outage, so recovery was moved on-device.)
+├── auto_recover.py (always-on via launchd, port 9999): heartbeat recovery
+│   └── On each reverse-shell dial-in (every 30s) checks last-poll.txt. If
+│       stale > 12 min, sends ONE eth0-bounce + app-restart over the shell,
+│       then waits 15 min before acting again; after 3 failed attempts backs
+│       off to hourly + logs CRITICAL. Bounds eth0 bounces to <= 1 per 15 min
+│       so the network never churns into a wedge (the 2026-06-06 outage was
+│       caused by bouncing every ~5 min). State in images/auto-recover-state.json.
+│   └── Heartbeat is the ONLY reliable failure signal: during the ENETUNREACH
+│       bug dumpsys on the display reports a healthy validated network, so the
+│       display cannot self-detect it. Detection must live here.
 │   └── Conflicts with tools/remote_shell.py – only one binds port 9999
 ├── tplink_admin.py
 │   └── Cookie auth to WR802N admin UI (status / reboot)
@@ -53,23 +57,15 @@ EPD-42S Display (DHCP from Massey via bridge)
 ├── /system/bin/install-recovery.sh (boot hook)
 │   └── Waits for eth0 IP (max 60s), then launches supervisor.sh
 ├── /data/local/tmp/supervisor.sh
-│   └── Every 60s, respawns display_remote.sh + tp_watchdog.sh +
-│       app_watchdog.sh if dead.
+│   └── Every 60s, respawns display_remote.sh + tp_watchdog.sh if dead.
 │   └── Without this, a single daemon crash takes the recovery loop
 │       offline until physical OS reboot (panel power-cycle is not enough,
 │       because Android keeps running through it).
-├── /data/local/tmp/app_watchdog.sh
-│   └── Every 120s, checks `dumpsys connectivity` for an active app default
-│       network. If absent (ConnectivityManager lost eth0 → apps get
-│       ENETUNREACH while root networking still works), bounces eth0 +
-│       restarts the app; escalates to a full Android reboot after 3 fails.
-│   └── This is the PRIMARY recovery. It runs locally and the reboot needs
-│       no network, so it works even when every remote channel is dead.
 ├── /data/local/tmp/tp_watchdog.sh
 │   └── Pings Mac mini every 60s, reboots bridge after 3 failures.
-│   └── NOTE: its nc check is root-level so it cannot see the app-layer
-│       ENETUNREACH failure (root networking works while apps are dead);
-│       that is exactly why app_watchdog.sh exists.
+│   └── NOTE: its nc check is root-level, so it cannot see the ENETUNREACH
+│       bug (root networking works while apps are dead). That failure is
+│       handled by auto_recover.py on Massey, keyed off the heartbeat.
 ├── /data/local/tmp/display_remote.sh
 │   └── Connects OUT to Mac mini :9999 every 30s (reverse shell)
 ├── Patched OpenDisplay APK (BootReceiver auto-launches)

@@ -18,7 +18,7 @@
 # `busybox ps w` to match the script name in the cmdline.
 
 LOG=/data/local/tmp/supervisor.log
-DAEMONS="display_remote.sh tp_watchdog.sh app_watchdog.sh"
+DAEMONS="display_remote.sh tp_watchdog.sh"
 INTERVAL=60
 
 log() {

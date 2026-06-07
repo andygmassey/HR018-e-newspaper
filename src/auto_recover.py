@@ -1,44 +1,95 @@
 """
-Display reachability monitor (detection / alerting only).
+Auto-recovery daemon for the e-ink display (heartbeat-triggered).
 
-Listens on port 9999 for the display's persistent reverse shell connection
-(/data/local/tmp/display_remote.sh dials home every 30 seconds). On each
-dial-in it reads images/last-poll.txt and logs whether the display's
-heartbeat is fresh or stale.
+Listens on port 9999 for the display's persistent reverse-shell dial-in
+(/data/local/tmp/display_remote.sh dials home every 30 seconds) and uses
+images/last-poll.txt (the server heartbeat) as the source of truth for
+whether the display is actually serving.
 
-It does NOT send recovery commands. Active recovery is owned by the
-display's own app_watchdog.sh (see deploy/display/), which detects the
-app-layer ENETUNREACH condition locally via dumpsys and escalates to a
-full reboot. That on-device design is strictly better because it works
-even when every remote channel is dead, which is the situation that
-matters most.
+WHY HEARTBEAT, NOT AN ON-DEVICE CHECK
+The failure mode (the "ENETUNREACH" bug, 2026-06): after a network blip the
+OpenDisplay app's connect() fails with ENETUNREACH even though Android's
+ConnectivityManager reports a healthy, validated default network. dumpsys on
+the display therefore looks fine during the failure, so the display cannot
+reliably self-detect it. The Mac mini heartbeat is the only trustworthy
+signal: if last-poll.txt stops advancing, the display has stopped serving,
+full stop.
 
-History: this daemon used to send an eth0-bounce FIX and a REBOOT on stale
-heartbeats. On 2026-06-06 that recipe caused an outage: repeated eth0
-bounces churned the network until the reverse shell itself died, after
-which nothing could recover the display remotely and it needed a physical
-cold boot. Recovery was moved on-device; this is now detection only.
+RECOVERY
+The only action that reliably clears the failure is: bounce eth0 (forces a
+fresh ConnectivityManager network agent), then restart the OpenDisplay app
+so it binds to the new agent. A reboot does NOT fix it (verified: a full
+cold boot came up still broken).
 
-To take over the reverse-shell channel for manual OTA work, stop this
-daemon first (it owns port 9999):
-  launchctl unload ~/Library/LaunchAgents/com.e-newspaper.auto-recover.plist
+CASCADE SAFETY (the hard-won part)
+Doing the eth0 bounce repeatedly is harmful: it churns the network through
+agent ids and can wedge eth0 entirely, killing even the reverse shell
+(that is what turned the 2026-06-06 incident into a 30-hour outage). So:
+  - After any recovery we wait COOLDOWN (15 min) before acting again. The
+    bounce takes ~25s and a successful poll lands within one poll interval,
+    so 15 min is ample to confirm success and reset.
+  - After CAP (3) consecutive failed attempts we stop hammering and back off
+    to BACKOFF (1 hour) between attempts, logging CRITICAL so a human looks.
+  - Any fresh heartbeat resets the attempt counter.
+This bounds eth0 bounces to at most one per 15 min (then one per hour),
+which keeps the reverse shell alive so we never lose the channel.
+
+State (attempt count + last action time) is persisted to
+images/auto-recover-state.json so restarts do not reset the backoff.
+
+Conflicts: only one process can bind port 9999. To use tools/remote_shell.py
+or tools/fix_display.py interactively, stop this daemon first
+(launchctl unload ~/Library/LaunchAgents/com.e-newspaper.auto-recover.plist).
 """
 from __future__ import annotations
 
+import json
 import logging
 import socket
+import time
 from datetime import datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LAST_POLL = PROJECT_ROOT / "images" / "last-poll.txt"
+STATE_PATH = PROJECT_ROOT / "images" / "auto-recover-state.json"
 
 PORT = 9999
 
-# Display polls every 300s; 360 gives a one-poll buffer before we call it stale.
-STALE_THRESHOLD = 360
+# All seconds.
+STALE_THRESHOLD = 720      # 12 min: ~2 missed 5-min polls + buffer
+COOLDOWN = 900             # 15 min between recovery attempts
+CAP = 3                    # consecutive attempts before backing off
+BACKOFF = 3600             # 1 hour between attempts once capped
+
+# eth0 bounce + ConnectivityManager kick + app restart, backgrounded with
+# nohup so it survives the reverse shell dropping when eth0 goes down.
+# Mirrors tools/fix_display.py.
+FIX_RECIPE = (
+    "nohup sh -c '"
+    "sleep 1; ifconfig eth0 down; sleep 3; ifconfig eth0 up; sleep 3; "
+    "netcfg eth0 dhcp; sleep 10; "
+    "am broadcast -a android.net.conn.CONNECTIVITY_CHANGE; sleep 2; "
+    "am force-stop org.opendisplay.android; sleep 1; "
+    "am start -n org.opendisplay.android/.MainActivity"
+    "' >/dev/null 2>&1 &\n"
+)
 
 logger = logging.getLogger("auto_recover")
+
+
+def load_state() -> dict:
+    if STATE_PATH.exists():
+        try:
+            return json.loads(STATE_PATH.read_text())
+        except Exception:
+            logger.exception("state file corrupt, starting fresh")
+    return {"last_recovery_at": 0, "consecutive_attempts": 0}
+
+
+def save_state(state: dict) -> None:
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STATE_PATH.write_text(json.dumps(state, indent=2))
 
 
 def heartbeat_age() -> float | None:
@@ -53,33 +104,41 @@ def heartbeat_age() -> float | None:
     return (datetime.now(ts.tzinfo) - ts).total_seconds()
 
 
-def serve_one(conn, addr) -> None:
-    """Handle a single reverse-shell dial-in.
-
-    Detection / alerting ONLY. Active recovery is now owned by the display's
-    own app_watchdog.sh (see deploy/display/), which detects the app-layer
-    ENETUNREACH condition via dumpsys and escalates to a full local reboot.
-    Sending FIX/REBOOT from here is both redundant and was the cause of the
-    2026-06-06 outage: the FIX recipe's repeated eth0 bounce churned the
-    network until even the reverse shell died, leaving nothing able to
-    recover it remotely.
-
-    We keep listening so dial-ins are visible (proof the reverse shell is
-    alive) and so a stale heartbeat is logged loudly for the human, but we
-    do not act. To take over the channel for manual OTA work, unload this
-    launch agent and run tools/remote_shell.py.
-    """
+def serve_one(conn, addr, state) -> bool:
+    """Handle one dial-in. Returns True if state changed (caller saves)."""
     conn.settimeout(15)
     age = heartbeat_age()
     age_str = f"{age:.0f}s" if age is not None else "none"
+    now = time.time()
 
-    if age is not None and age >= STALE_THRESHOLD:
-        logger.warning(
-            "dial-in %s: heartbeat stale (age=%s); display-side app_watchdog "
-            "should be recovering; not intervening from here", addr[0], age_str
-        )
-    else:
+    if age is None or age < STALE_THRESHOLD:
+        # Healthy. Reset the attempt counter if we'd been failing.
+        if state.get("consecutive_attempts", 0) > 0:
+            logger.info("dial-in %s: heartbeat fresh (age=%s), recovered, "
+                        "resetting attempts", addr[0], age_str)
+            state["consecutive_attempts"] = 0
+            return True
         logger.info("dial-in %s: age=%s, healthy", addr[0], age_str)
+        return False
+
+    # Stale. Decide whether we are allowed to act yet.
+    attempts = state.get("consecutive_attempts", 0)
+    since_last = now - state.get("last_recovery_at", 0)
+    wait = BACKOFF if attempts >= CAP else COOLDOWN
+
+    if since_last < wait:
+        logger.warning("dial-in %s: heartbeat STALE (age=%s), attempt %d, "
+                       "in cooldown (%.0fs/%ds)", addr[0], age_str,
+                       attempts, since_last, wait)
+        return False
+
+    level = logging.CRITICAL if attempts >= CAP else logging.WARNING
+    logger.log(level, "dial-in %s: heartbeat STALE (age=%s), sending recovery "
+               "(attempt %d)", addr[0], age_str, attempts + 1)
+    conn.sendall(FIX_RECIPE.encode())
+    state["last_recovery_at"] = now
+    state["consecutive_attempts"] = attempts + 1
+    return True
 
 
 def main() -> int:
@@ -101,7 +160,9 @@ def main() -> int:
             logger.exception("accept failed")
             continue
         try:
-            serve_one(conn, addr)
+            state = load_state()
+            if serve_one(conn, addr, state):
+                save_state(state)
         except Exception:
             logger.exception("error handling dial-in")
         finally:

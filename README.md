@@ -28,7 +28,7 @@ Mac mini (always-on macOS)
 ├── processor.py → fit/grayscale/rotate → images/current.png
 ├── server.py → OpenDisplay WiFi server :2446 + mDNS
 ├── watchdog.py → heartbeat monitor (every 5 min)
-├── auto_recover.py → detection/alert only: logs display heartbeat staleness via :9999
+├── auto_recover.py → on stale heartbeat, sends one eth0-bounce + app-restart via :9999 (15-min cooldown, 3-attempt cap)
 ├── tplink_admin.py → bridge status/reboot via admin UI
 └── tools/remote_shell.py → manual reverse shell (use when auto_recover is unloaded)
 
@@ -37,9 +37,8 @@ TP-Link WR802N (Client mode bridge, WiFi-to-Ethernet)
 EPD-42S Display (Android 5.1.1, Ethernet via bridge)
 ├── install-recovery.sh → waits for eth0, then launches supervisor.sh at boot
 ├── supervisor.sh → respawns dead daemons every 60s (the self-healing core)
-├── app_watchdog.sh → recovers app-layer network loss (ENETUNREACH); reboots after 3 fails
 ├── tp_watchdog.sh → auto-reboots bridge on connectivity loss
-├── display_remote.sh → reverse shell to Mac mini for OTA access
+├── display_remote.sh → reverse shell to Mac mini (recovery channel + OTA)
 └── OpenDisplay WiFi app → polls server, renders on e-ink panel
 ```
 
