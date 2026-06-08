@@ -26,34 +26,39 @@ channel is `display_remote.sh` dialing in.
 The supervisor closes that gap with a single shell `while true` loop that
 checks the process table every 60s and respawns dead daemons.
 
-## The ENETUNREACH failure (and where it is handled)
+## The recurring network failure (and where it is handled)
 
-Observed 2026-06: after a network blip, the OpenDisplay app's connect()
-fails with `ENETUNREACH (Network is unreachable)` even though Android's
-ConnectivityManager reports a healthy, validated default network. The app
-connect-drops forever and the panel sticks on "waiting for server".
+Observed 2026-06: every day or so the display stops serving and the panel
+sticks on "waiting for server". It has appeared in two forms:
 
-Two things make this nasty:
+- The OpenDisplay app's connect() fails with `ENETUNREACH` even though
+  ConnectivityManager reports a healthy, validated default network.
+- ConnectivityManager has no Ethernet network agent at all
+  (`dumpsys connectivity` shows `Active default network: none`).
 
-- It cannot be self-detected on the display. `dumpsys connectivity` shows a
-  healthy validated network during the failure (an early fix attempt keyed
-  off `Active default network` and never fired, because that signal reads
-  "healthy" the whole time). `tp_watchdog.sh`'s root-level `nc` also passes,
-  because root networking works while only apps are broken.
-- A reboot does NOT fix it (a full 30s DC cold boot came up still broken).
-  The only reliable cure is: bounce eth0 (forces a fresh network agent),
-  then restart the app so it binds the new agent.
+It cannot be self-detected on the display: `dumpsys` reads "healthy" during
+the first form, and `tp_watchdog.sh`'s root-level `nc` passes in both
+(root networking works while only apps are broken). The only trustworthy
+signal is the Mac mini heartbeat (`images/last-poll.txt`).
 
-Because the display can't detect it, recovery is driven from Massey, which
-*can* see it via the server heartbeat (`images/last-poll.txt`).
-`src/auto_recover.py` watches the heartbeat and, when it goes stale, sends
-the eth0-bounce + app-restart over the reverse shell. Critically it does
-this at most once per 15 min (then backs off to hourly after 3 tries):
-bouncing eth0 repeatedly is what wedged the network and killed the reverse
-shell during the 2026-06-06 outage, turning a blip into a 30-hour stall.
+So recovery is driven from Massey. `src/auto_recover.py` watches the
+heartbeat and, when it goes stale > 12 min, REBOOTS the display over the
+reverse shell (10-min cooldown, backing off to hourly after 4 reboots). A
+plain reboot clears both forms. Earlier versions bounced eth0 instead;
+that fixed only the first form, caused the second by churning network
+agents, and fought tp_watchdog. Repeated eth0 bounces are also what wedged
+the network and turned the 2026-06-06 blip into a 30-hour stall; reboots
+are safe to repeat.
 
-Manual one-shot of the same recovery: `python3 tools/fix_display.py` on
-Massey (stop auto_recover first to free port 9999).
+Likely underlying cause (unconfirmed): the display's DHCP lease flaps
+between the real router (`gw .1`) and the TP-Link itself (`gw .253`),
+i.e. two DHCP servers answering. The WR802N appears to be in WISP mode
+(its own DHCP/NAT) rather than a pure L2 bridge. Pinning that down is the
+real "make it stop" fix; the reboot loop is the safety net until then.
+
+Manual reboot: `python3 tools/fix_display.py` sends the old eth0-bounce
+recipe, but to just reboot, stop auto_recover and send `reboot` over the
+reverse shell (see session notes).
 
 ## Deployment
 

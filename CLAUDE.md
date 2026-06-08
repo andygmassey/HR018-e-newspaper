@@ -31,13 +31,16 @@ Mac mini "Massey" (192.168.1.72, always-on macOS)
 │   └── Alerts when last-poll.txt stale > 900s
 ├── auto_recover.py (always-on via launchd, port 9999): heartbeat recovery
 │   └── On each reverse-shell dial-in (every 30s) checks last-poll.txt. If
-│       stale > 12 min, sends ONE eth0-bounce + app-restart over the shell,
-│       then waits 15 min before acting again; after 3 failed attempts backs
-│       off to hourly + logs CRITICAL. Bounds eth0 bounces to <= 1 per 15 min
-│       so the network never churns into a wedge (the 2026-06-06 outage was
-│       caused by bouncing every ~5 min). State in images/auto-recover-state.json.
-│   └── Heartbeat is the ONLY reliable failure signal: during the ENETUNREACH
-│       bug dumpsys on the display reports a healthy validated network, so the
+│       stale > 12 min, REBOOTS the display over the shell, waits 10 min,
+│       and after 4 reboots backs off to hourly + logs CRITICAL. State in
+│       images/auto-recover-state.json.
+│   └── Recovery is a plain reboot, deliberately: the failure shows up as
+│       either a valid-but-unbindable network (app ENETUNREACH) or no network
+│       agent at all, and a reboot clears both. Earlier versions bounced eth0;
+│       that fixed only the first, CREATED the second by churning network
+│       agents, and fought tp_watchdog. Reboots are safe to repeat.
+│   └── Heartbeat is the ONLY reliable failure signal: during the failure
+│       dumpsys on the display can report a healthy validated network, so the
 │       display cannot self-detect it. Detection must live here.
 │   └── Conflicts with tools/remote_shell.py – only one binds port 9999
 ├── tplink_admin.py

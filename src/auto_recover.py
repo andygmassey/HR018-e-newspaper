@@ -7,32 +7,29 @@ images/last-poll.txt (the server heartbeat) as the source of truth for
 whether the display is actually serving.
 
 WHY HEARTBEAT, NOT AN ON-DEVICE CHECK
-The failure mode (the "ENETUNREACH" bug, 2026-06): after a network blip the
-OpenDisplay app's connect() fails with ENETUNREACH even though Android's
-ConnectivityManager reports a healthy, validated default network. dumpsys on
-the display therefore looks fine during the failure, so the display cannot
-reliably self-detect it. The Mac mini heartbeat is the only trustworthy
-signal: if last-poll.txt stops advancing, the display has stopped serving,
-full stop.
+The display cannot reliably self-detect the failure: during it, the
+display's own `dumpsys connectivity` can report a healthy validated network
+while the app still cannot connect, and `tp_watchdog.sh`'s root-level `nc`
+also passes (root networking works while only apps are broken). The Mac
+mini heartbeat is the only trustworthy signal: if last-poll.txt stops
+advancing, the display has stopped serving.
 
-RECOVERY
-The only action that reliably clears the failure is: bounce eth0 (forces a
-fresh ConnectivityManager network agent), then restart the OpenDisplay app
-so it binds to the new agent. A reboot does NOT fix it (verified: a full
-cold boot came up still broken).
+RECOVERY: REBOOT, NOTHING CLEVER
+The failure has shown up in two forms: a valid Ethernet network agent the
+app cannot bind (ENETUNREACH), and no Ethernet network agent at all
+(`Active default network: none`). A full reboot recreates the network
+stack from scratch and has reliably cleared both in practice. The eth0
+bounce that earlier versions used was a mistake: it fixes only the first
+form, can CREATE the second by churning network agents, and fights
+tp_watchdog.sh (which also touches eth0 / the bridge). So recovery here is
+simply: reboot the display.
 
-CASCADE SAFETY (the hard-won part)
-Doing the eth0 bounce repeatedly is harmful: it churns the network through
-agent ids and can wedge eth0 entirely, killing even the reverse shell
-(that is what turned the 2026-06-06 incident into a 30-hour outage). So:
-  - After any recovery we wait COOLDOWN (15 min) before acting again. The
-    bounce takes ~25s and a successful poll lands within one poll interval,
-    so 15 min is ample to confirm success and reset.
-  - After CAP (3) consecutive failed attempts we stop hammering and back off
-    to BACKOFF (1 hour) between attempts, logging CRITICAL so a human looks.
-  - Any fresh heartbeat resets the attempt counter.
-This bounds eth0 bounces to at most one per 15 min (then one per hour),
-which keeps the reverse shell alive so we never lose the channel.
+CASCADE SAFETY
+A reboot is safe to repeat (unlike eth0 bouncing, which wedged the network
+and caused the 2026-06-06 30-hour outage). Still, we wait COOLDOWN (10 min)
+between reboots so a display that boots into a bad state is not rebooted in
+a tight loop, and after CAP reboots we back off to BACKOFF (1 hour) and log
+CRITICAL so a human looks. Any fresh heartbeat resets the counter.
 
 State (attempt count + last action time) is persisted to
 images/auto-recover-state.json so restarts do not reset the backoff.
@@ -58,22 +55,13 @@ PORT = 9999
 
 # All seconds.
 STALE_THRESHOLD = 720      # 12 min: ~2 missed 5-min polls + buffer
-COOLDOWN = 900             # 15 min between recovery attempts
-CAP = 3                    # consecutive attempts before backing off
-BACKOFF = 3600             # 1 hour between attempts once capped
+COOLDOWN = 600             # 10 min between reboots
+CAP = 4                    # reboots before backing off
+BACKOFF = 3600             # 1 hour between reboots once capped
 
-# eth0 bounce + ConnectivityManager kick + app restart, backgrounded with
-# nohup so it survives the reverse shell dropping when eth0 goes down.
-# Mirrors tools/fix_display.py.
-FIX_RECIPE = (
-    "nohup sh -c '"
-    "sleep 1; ifconfig eth0 down; sleep 3; ifconfig eth0 up; sleep 3; "
-    "netcfg eth0 dhcp; sleep 10; "
-    "am broadcast -a android.net.conn.CONNECTIVITY_CHANGE; sleep 2; "
-    "am force-stop org.opendisplay.android; sleep 1; "
-    "am start -n org.opendisplay.android/.MainActivity"
-    "' >/dev/null 2>&1 &\n"
-)
+# Recovery: reboot the display. Backgrounded with nohup so it fires after
+# the reverse shell closes.
+REBOOT_RECIPE = "nohup sh -c 'sleep 1; reboot' >/dev/null 2>&1 &\n"
 
 logger = logging.getLogger("auto_recover")
 
@@ -132,12 +120,13 @@ def serve_one(conn, addr, state) -> bool:
                        attempts, since_last, wait)
         return False
 
+    next_attempt = attempts + 1
     level = logging.CRITICAL if attempts >= CAP else logging.WARNING
-    logger.log(level, "dial-in %s: heartbeat STALE (age=%s), sending recovery "
-               "(attempt %d)", addr[0], age_str, attempts + 1)
-    conn.sendall(FIX_RECIPE.encode())
+    logger.log(level, "dial-in %s: heartbeat STALE (age=%s), rebooting display "
+               "(attempt %d)", addr[0], age_str, next_attempt)
+    conn.sendall(REBOOT_RECIPE.encode())
     state["last_recovery_at"] = now
-    state["consecutive_attempts"] = attempts + 1
+    state["consecutive_attempts"] = next_attempt
     return True
 
 

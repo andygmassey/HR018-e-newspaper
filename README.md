@@ -28,7 +28,7 @@ Mac mini (always-on macOS)
 ├── processor.py → fit/grayscale/rotate → images/current.png
 ├── server.py → OpenDisplay WiFi server :2446 + mDNS
 ├── watchdog.py → heartbeat monitor (every 5 min)
-├── auto_recover.py → on stale heartbeat, sends one eth0-bounce + app-restart via :9999 (15-min cooldown, 3-attempt cap)
+├── auto_recover.py → on stale heartbeat, reboots the display via :9999 (10-min cooldown, 4-reboot cap then hourly)
 ├── tplink_admin.py → bridge status/reboot via admin UI
 └── tools/remote_shell.py → manual reverse shell (use when auto_recover is unloaded)
 

@@ -7,13 +7,13 @@
 
         Listens on TCP 9999 for the display's reverse-shell dial-in. The
         server heartbeat (images/last-poll.txt) is the only reliable failure
-        signal: during the ENETUNREACH bug the display's own dumpsys reports
-        a healthy network, so the display cannot self-detect it. When the
-        heartbeat goes stale this daemon sends ONE eth0-bounce + app-restart
-        over the reverse shell, then waits 15 min before acting again, and
-        backs off to hourly after 3 attempts. That rate limit is the whole
-        point: bouncing eth0 every ~5 min is what wedged the network and
-        caused the 2026-06-06 outage.
+        signal: during the failure the display's own dumpsys can report a
+        healthy network, so the display cannot self-detect it. When the
+        heartbeat goes stale this daemon REBOOTS the display over the reverse
+        shell, waits 10 min, and backs off to hourly after 4 reboots. A plain
+        reboot clears both observed failure forms (app ENETUNREACH, and no
+        network agent at all); earlier eth0-bounce versions fixed only one,
+        caused the other, and fought tp_watchdog.
 
         Install:
           cp deploy/com.e-newspaper.auto-recover.plist ~/Library/LaunchAgents/
