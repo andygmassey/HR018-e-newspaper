@@ -50,11 +50,20 @@ agents, and fought tp_watchdog. Repeated eth0 bounces are also what wedged
 the network and turned the 2026-06-06 blip into a 30-hour stall; reboots
 are safe to repeat.
 
-Likely underlying cause (unconfirmed): the display's DHCP lease flaps
-between the real router (`gw .1`) and the TP-Link itself (`gw .253`),
-i.e. two DHCP servers answering. The WR802N appears to be in WISP mode
-(its own DHCP/NAT) rather than a pure L2 bridge. Pinning that down is the
-real "make it stop" fix; the reboot loop is the safety net until then.
+Underlying cause (still open). The bridge was checked from the display
+side on 2026-06-08 (read its StatusRpm.htm via the reverse shell) and is
+confirmed in Client mode / pure bridge: WLAN and LAN share MAC and IP
+.253, WAN params all zero. So it is NOT WISP/NAT (an earlier session also
+chased and debunked the WISP theory; do not repeat it). The one concrete
+oddity found: the display's DHCP lease is `server 192.168.1.253,
+gateway 192.168.1.253, leasetime 60` -- a 60-second lease, which forces a
+renewal roughly every 30s and is a plausible contributor to the network
+churn. Its exact origin is not fully understood and the bridge cannot be
+safely reconfigured remotely (a wrong change drops the display with no way
+back in), so this is left as a lead, not a fix. The documented long-term
+remedy is a hardware swap to a GL.iNet GL-MT300N-V2 (a Discord peer runs
+one reliably); see the bridge-reliability notes. The reboot loop is the
+safety net until then.
 
 Manual reboot: `python3 tools/fix_display.py` sends the old eth0-bounce
 recipe, but to just reboot, stop auto_recover and send `reboot` over the

@@ -15,9 +15,11 @@ Usage:
 
 NETWORK REQUIREMENT — READ THIS FIRST:
     The tool talks directly to the TP-Link admin IP (default
-    192.168.1.253), which is a LAN-side address under the WR802N's
-    current WISP/Client Router mode. You MUST run it from a machine
-    physically on the TP-Link's LAN segment — typically:
+    192.168.1.253). The WR802N is in Client mode (pure bridge): LAN and
+    WLAN share MAC and IP .253, no WAN. The admin IP is only reachable
+    from the bridge's own LAN segment, NOT from Massey Wi-Fi (the bridge
+    only forwards outbound traffic, 3-address Wi-Fi framing). You MUST run
+    it from a machine physically on the TP-Link's LAN segment, typically:
       • a laptop plugged into the TP-Link's LAN ethernet port, or
       • the display itself, via `adb shell` (doesn't have Python —
         see the shell-wrapper follow-up if you need that path)
@@ -138,7 +140,8 @@ def _authenticate(session: requests.Session, router: str, password: str) -> str:
             "This tool must be run from a machine on the TP-Link's LAN "
             "side (see the NETWORK REQUIREMENT note at the top of the "
             "file). Mac mini and any device on Massey WiFi cannot reach "
-            "192.168.1.253 under the current WISP mode."
+            "192.168.1.253: the WR802N is a Client-mode bridge that only "
+            "forwards outbound traffic."
         )
     r.raise_for_status()
     html = r.text
