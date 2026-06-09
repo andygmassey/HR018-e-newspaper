@@ -11,7 +11,7 @@ can be redeployed via ADB.
 | `install-recovery.sh` | `/system/bin/install-recovery.sh` | `init.rc` (oneshot, class main) | Boot hook. Waits for eth0 IP, then launches `supervisor.sh`. |
 | `supervisor.sh` | `/data/local/tmp/supervisor.sh` | `install-recovery.sh` | Respawns `display_remote.sh` and `net_watchdog.sh` every 60s if dead. |
 | `display_remote.sh` | `/data/local/tmp/display_remote.sh` | `supervisor.sh` | Reverse shell: dials Massey :9999 every 30s. Recovery channel + OTA. |
-| `net_watchdog.sh` | `/data/local/tmp/net_watchdog.sh` | `supervisor.sh` | Every 45s checks it can actually reach Massey; on failure re-DHCPs eth0 and, if still unreachable, reboots. Self-contained network self-heal. |
+| `net_watchdog.sh` | `/data/local/tmp/net_watchdog.sh` | `supervisor.sh` | Every 30s checks it can actually reach Massey; reboots if it stays unreachable ~2 min. Self-contained network self-heal (reboot-only, nothing in the loop that can hang). |
 
 ## Why a supervisor
 
@@ -45,25 +45,29 @@ Earlier theories were wrong and are debunked:
 - "Root networking keeps working while only apps break" was also wrong in
   this failure: root `ping` fails with `Network is unreachable` too.
 
-Recovery is subtle on Android 5.1 because it uses **policy routing**: netd
-installs per-network `ip rule` tables, so repopulating the *main* route
-table (what `netcfg eth0 dhcp` does) is not always enough, the routes are
-never consulted. A populated main table can still be fully unreachable. The
-thing that reliably rebuilds eth0's network, including the netd policy
-routing, is the **framework bringing it up at boot**. A clean boot comes up
-with a working config (`gateway 192.168.1.253`, the bridge, reachable).
+Recovery has to be a **reboot**, for two reasons learned the hard way:
+- A light `netcfg eth0 dhcp` is not enough. Android 5.1 uses policy routing
+  (netd per-network `ip rule` tables), so repopulating the *main* route
+  table does not restore reachability; a populated main table can still be
+  fully unreachable. Only the framework rebuilding eth0 at boot reliably
+  restores routing (a clean boot comes up with `gateway 192.168.1.253`,
+  reachable).
+- Worse, `netcfg eth0 dhcp` BLOCKS when the network is fully wedged. An
+  earlier version of net_watchdog tried it as a first step and hung inside
+  it for 14 minutes, never reaching the reboot. So the loop must contain
+  nothing that can stall.
 
-So the fix is `net_watchdog.sh`, fully on-device and self-contained:
+So `net_watchdog.sh` is **reboot-only**, fully on-device and self-contained:
 
-1. Every 45s it checks whether it can actually **reach Massey** (root ping).
+1. Every 30s it checks whether it can actually **reach Massey** (root ping).
    Reachability is the only trustworthy signal; main-table routes can lie.
-2. On failure it runs `netcfg eth0 dhcp` (light: fixes the common case where
-   dhcpcd just died but the framework network is intact).
-3. If reachability is still not restored after a few cycles, it **reboots**.
-   The reboot is issued locally, so it works even when every network path is
-   dead. This is what eliminates the old "dead until a 30-second DC unplug"
-   dead-end: the display no longer needs Massey, the reverse shell, or a
-   human to recover.
+2. If it cannot reach Massey for ~2 minutes (4 consecutive failures, past a
+   boot-grace window so it cannot tight-loop), it **reboots**. The reboot is
+   local, so it works even when every network path is dead, and nothing in
+   the loop can hang. This eliminates the old "dead until a 30-second DC
+   unplug" dead-end: the display no longer needs Massey, the reverse shell,
+   or a human to recover. Validated 2026-06-09 by blocking traffic to Massey
+   and watching it reboot itself back to health.
 
 `src/auto_recover.py` on Massey (heartbeat stale > 12 min -> reboot over the
 reverse shell) is kept as an external backstop, but it should rarely fire now
@@ -119,8 +123,8 @@ You should see all three processes within ~60s of boot.
 ## Logs
 
 - `/data/local/tmp/supervisor.log` is the supervisor's own log
-- `/data/local/tmp/net_watchdog.log` records every reachability failure,
-  re-DHCP, and reboot decision (the place to look after a stall)
+- `/data/local/tmp/net_watchdog.log` records every reachability check that
+  failed and every reboot decision (the place to look after a stall)
 - `display_remote.sh` is silent by design
 - `adb shell 'logcat -d -s boot_init'` shows install-recovery.sh's log lines
 

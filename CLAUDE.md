@@ -56,7 +56,7 @@ TP-Link TL-WR802N (Client mode, pure bridge, .253)
 │   └── Display → Massey: works
 │   └── Massey → Display: BLOCKED (no inbound)
 └── Radio flaps + high latency (1.5-2.5s); net_watchdog.sh on the
-    display rides it out (re-DHCP, then reboot if still unreachable)
+    display reboots it if it can't reach Massey for ~2 min
 
 EPD-42S Display (DHCP from Massey via bridge)
 ├── /system/bin/install-recovery.sh (boot hook)
@@ -66,17 +66,20 @@ EPD-42S Display (DHCP from Massey via bridge)
 │   └── Without this, a single daemon crash takes the recovery loop
 │       offline until physical OS reboot (panel power-cycle is not enough,
 │       because Android keeps running through it).
-├── /data/local/tmp/net_watchdog.sh  ← PRIMARY network self-heal
-│   └── Every 45s checks it can REACH Massey (root ping). Reachability is
+├── /data/local/tmp/net_watchdog.sh  ← PRIMARY network self-heal (reboot-only)
+│   └── Every 30s checks it can REACH Massey (root ping). Reachability is
 │       the only trustworthy signal: Android 5.1 uses policy routing, so a
-│       populated main route table can still be fully unreachable, and
-│       netcfg-style re-DHCP repopulates the main table without restoring
-│       the netd per-network routing.
-│   └── On failure: netcfg eth0 dhcp (light); if still unreachable after a
-│       few cycles, reboot (the framework rebuilds eth0 cleanly at boot).
-│       All on-device, so it heals with NOTHING plugged in: no Massey, no
-│       reverse shell, no physical unplug. Replaces tp_watchdog.sh (which
-│       rebooted the bridge, wrong target). Log: net_watchdog.log.
+│       populated main route table can still be fully unreachable.
+│   └── If unreachable for ~2 min (4 cycles past a boot-grace window),
+│       REBOOT. Reboot-only by design: netcfg-style re-DHCP was removed
+│       because (a) it BLOCKS when the net is fully wedged and hung the
+│       watchdog for 14 min, and (b) it does not restore the netd policy
+│       routing anyway. Only a boot rebuilds eth0 cleanly. Nothing in the
+│       loop can hang, so it always reaches recovery.
+│   └── All on-device: heals with NOTHING plugged in (no Massey, no reverse
+│       shell, no unplug). Replaces tp_watchdog.sh. Log: net_watchdog.log.
+│       Validated 2026-06-09 by blocking traffic to Massey and watching it
+│       reboot itself back to health.
 ├── /data/local/tmp/display_remote.sh
 │   └── Connects OUT to Mac mini :9999 every 30s (reverse shell)
 ├── Patched OpenDisplay APK (BootReceiver auto-launches)
@@ -173,7 +176,7 @@ The TP-Link WR802N is in **Client mode (pure bridge)**, NOT NAT/WISP.
   reach display (3-address WiFi framing limitation)
 - `adb connect` from Mac mini does NOT work; use the reverse shell
 - Radio flaps + high latency (1.5-2.5s): net_watchdog.sh on the display
-  re-DHCPs and, if still unreachable, reboots to recover
+  reboots it when it cannot reach Massey for ~2 min (reboot-only self-heal)
 
 ## Display Boot Sequence
 
