@@ -19,7 +19,7 @@ while [ $ATTEMPT -lt 6 ]; do
 done
 
 # 2. Start the daemon supervisor. The supervisor respawns
-#    display_remote.sh and tp_watchdog.sh if they die, so we don't
+#    display_remote.sh and net_watchdog.sh if they die, so we don't
 #    need to start them directly here.
 nohup sh /data/local/tmp/supervisor.sh >/dev/null 2>&1 &
 

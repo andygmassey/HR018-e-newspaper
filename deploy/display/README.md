@@ -9,14 +9,14 @@ can be redeployed via ADB.
 | File | Path on display | Started by | Purpose |
 | ---- | --------------- | ---------- | ------- |
 | `install-recovery.sh` | `/system/bin/install-recovery.sh` | `init.rc` (oneshot, class main) | Boot hook. Waits for eth0 IP, then launches `supervisor.sh`. |
-| `supervisor.sh` | `/data/local/tmp/supervisor.sh` | `install-recovery.sh` | Respawns `display_remote.sh` and `tp_watchdog.sh` every 60s if dead. |
+| `supervisor.sh` | `/data/local/tmp/supervisor.sh` | `install-recovery.sh` | Respawns `display_remote.sh` and `net_watchdog.sh` every 60s if dead. |
 | `display_remote.sh` | `/data/local/tmp/display_remote.sh` | `supervisor.sh` | Reverse shell: dials Massey :9999 every 30s. Recovery channel + OTA. |
-| `tp_watchdog.sh` | `/data/local/tmp/tp_watchdog.sh` | `supervisor.sh` | Pings Massey every 60s, reboots the TP-Link bridge after 3 failures. |
+| `net_watchdog.sh` | `/data/local/tmp/net_watchdog.sh` | `supervisor.sh` | Every 45s checks it can actually reach Massey; on failure re-DHCPs eth0 and, if still unreachable, reboots. Self-contained network self-heal. |
 
 ## Why a supervisor
 
 Android was observed running 7+ continuous days with both daemons silently
-dead (`display_remote.sh` and `tp_watchdog.sh` both exited). `install-recovery.sh`
+dead (`display_remote.sh` and the network watchdog both exited). `install-recovery.sh`
 only fires at the actual Android boot, and the panel's power button cycles
 the EPD panel without rebooting Android (Android keeps running through the
 power blip). So once a daemon died there was nothing on-device to bring it
@@ -26,48 +26,57 @@ channel is `display_remote.sh` dialing in.
 The supervisor closes that gap with a single shell `while true` loop that
 checks the process table every 60s and respawns dead daemons.
 
-## The recurring network failure (and where it is handled)
+## The recurring network failure (root cause and the fix)
 
-Observed 2026-06: every day or so the display stops serving and the panel
-sticks on "waiting for server". It has appeared in two forms:
+Observed 2026-06: every day or so the display stopped serving and the panel
+stuck on "waiting for server".
 
-- The OpenDisplay app's connect() fails with `ENETUNREACH` even though
-  ConnectivityManager reports a healthy, validated default network.
-- ConnectivityManager has no Ethernet network agent at all
-  (`dumpsys connectivity` shows `Active default network: none`).
+Root cause (ground-truthed over adb in the actual failure state, 2026-06-09):
+eth0 loses its DHCP lease / network config. dhcpcd drops (`init.svc.dhcpcd_eth0:
+stopped`, `dhcp.eth0.reason: PREINIT`), the interface stays UP at L2 (IPv6
+link-local present, packets flowing) but has NO IPv4 address and NO routes.
+All IPv4 dies, even at root, so the OpenDisplay app and the reverse shell
+both go dark. This is a total network loss, not an app-only `ENETUNREACH`.
 
-It cannot be self-detected on the display: `dumpsys` reads "healthy" during
-the first form, and `tp_watchdog.sh`'s root-level `nc` passes in both
-(root networking works while only apps are broken). The only trustworthy
-signal is the Mac mini heartbeat (`images/last-poll.txt`).
+Earlier theories were wrong and are debunked:
+- The "60-second bridge lease" was never real. The live lease is `server
+  192.168.1.1, gateway 192.168.1.1, leasetime 86400` (24h, from the upstream
+  router). The bridge is a pure L2 bridge and is not the DHCP server.
+- "Root networking keeps working while only apps break" was also wrong in
+  this failure: root `ping` fails with `Network is unreachable` too.
 
-So recovery is driven from Massey. `src/auto_recover.py` watches the
-heartbeat and, when it goes stale > 12 min, REBOOTS the display over the
-reverse shell (10-min cooldown, backing off to hourly after 4 reboots). A
-plain reboot clears both forms. Earlier versions bounced eth0 instead;
-that fixed only the first form, caused the second by churning network
-agents, and fought tp_watchdog. Repeated eth0 bounces are also what wedged
-the network and turned the 2026-06-06 blip into a 30-hour stall; reboots
-are safe to repeat.
+Recovery is subtle on Android 5.1 because it uses **policy routing**: netd
+installs per-network `ip rule` tables, so repopulating the *main* route
+table (what `netcfg eth0 dhcp` does) is not always enough, the routes are
+never consulted. A populated main table can still be fully unreachable. The
+thing that reliably rebuilds eth0's network, including the netd policy
+routing, is the **framework bringing it up at boot**. A clean boot comes up
+with a working config (`gateway 192.168.1.253`, the bridge, reachable).
 
-Underlying cause (still open). The bridge was checked from the display
-side on 2026-06-08 (read its StatusRpm.htm via the reverse shell) and is
-confirmed in Client mode / pure bridge: WLAN and LAN share MAC and IP
-.253, WAN params all zero. So it is NOT WISP/NAT (an earlier session also
-chased and debunked the WISP theory; do not repeat it). The one concrete
-oddity found: the display's DHCP lease is `server 192.168.1.253,
-gateway 192.168.1.253, leasetime 60` -- a 60-second lease, which forces a
-renewal roughly every 30s and is a plausible contributor to the network
-churn. Its exact origin is not fully understood and the bridge cannot be
-safely reconfigured remotely (a wrong change drops the display with no way
-back in), so this is left as a lead, not a fix. The documented long-term
-remedy is a hardware swap to a GL.iNet GL-MT300N-V2 (a Discord peer runs
-one reliably); see the bridge-reliability notes. The reboot loop is the
-safety net until then.
+So the fix is `net_watchdog.sh`, fully on-device and self-contained:
 
-Manual reboot: `python3 tools/fix_display.py` sends the old eth0-bounce
-recipe, but to just reboot, stop auto_recover and send `reboot` over the
-reverse shell (see session notes).
+1. Every 45s it checks whether it can actually **reach Massey** (root ping).
+   Reachability is the only trustworthy signal; main-table routes can lie.
+2. On failure it runs `netcfg eth0 dhcp` (light: fixes the common case where
+   dhcpcd just died but the framework network is intact).
+3. If reachability is still not restored after a few cycles, it **reboots**.
+   The reboot is issued locally, so it works even when every network path is
+   dead. This is what eliminates the old "dead until a 30-second DC unplug"
+   dead-end: the display no longer needs Massey, the reverse shell, or a
+   human to recover.
+
+`src/auto_recover.py` on Massey (heartbeat stale > 12 min -> reboot over the
+reverse shell) is kept as an external backstop, but it should rarely fire now
+that the display heals itself. Note its rough edge: it can reboot a display
+that has only just booted (heartbeat is briefly stale right after boot), so
+it is defence-in-depth, not the primary mechanism.
+
+Superseded: `tp_watchdog.sh` (rebooted the TP-Link bridge, wrong target,
+the bridge is not the fault) and the eth0-bounce recipe in
+`tools/fix_display.py`. The reboot-loop-from-Massey approach is no longer
+the primary recovery. A hardware swap to a GL.iNet GL-MT300N-V2 is still a
+sensible long-term upgrade for the flaky, high-latency WiFi bridge, but is
+no longer required to keep the display alive.
 
 ## Deployment
 
@@ -81,10 +90,10 @@ adb shell 'mount -o remount,rw /system'
 # Push /data/local/tmp scripts
 adb push deploy/display/supervisor.sh     /data/local/tmp/supervisor.sh
 adb push deploy/display/display_remote.sh /data/local/tmp/display_remote.sh
-adb push deploy/display/tp_watchdog.sh    /data/local/tmp/tp_watchdog.sh
+adb push deploy/display/net_watchdog.sh   /data/local/tmp/net_watchdog.sh
 adb shell 'chmod 755 /data/local/tmp/supervisor.sh \
                      /data/local/tmp/display_remote.sh \
-                     /data/local/tmp/tp_watchdog.sh'
+                     /data/local/tmp/net_watchdog.sh'
 
 # Push the boot hook
 adb push deploy/display/install-recovery.sh /system/bin/install-recovery.sh
@@ -97,7 +106,7 @@ adb shell 'mount -o remount,ro /system' 2>/dev/null
 adb reboot
 adb wait-for-device
 adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 2; done'
-adb shell 'busybox ps w | busybox grep -E "supervisor|display_remote|tp_watchdog" | busybox grep -v grep'
+adb shell 'busybox ps w | busybox grep -E "supervisor|display_remote|net_watchdog" | busybox grep -v grep'
 ```
 
 Note: the scripts can also be deployed over the reverse shell without USB
@@ -110,7 +119,9 @@ You should see all three processes within ~60s of boot.
 ## Logs
 
 - `/data/local/tmp/supervisor.log` is the supervisor's own log
-- `display_remote.sh` and `tp_watchdog.sh` are silent by design
+- `/data/local/tmp/net_watchdog.log` records every reachability failure,
+  re-DHCP, and reboot decision (the place to look after a stall)
+- `display_remote.sh` is silent by design
 - `adb shell 'logcat -d -s boot_init'` shows install-recovery.sh's log lines
 
 ## Notes on this Avalue build

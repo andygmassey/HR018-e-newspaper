@@ -34,14 +34,15 @@ Mac mini "Massey" (192.168.1.72, always-on macOS)
 │       stale > 12 min, REBOOTS the display over the shell, waits 10 min,
 │       and after 4 reboots backs off to hourly + logs CRITICAL. State in
 │       images/auto-recover-state.json.
-│   └── Recovery is a plain reboot, deliberately: the failure shows up as
-│       either a valid-but-unbindable network (app ENETUNREACH) or no network
-│       agent at all, and a reboot clears both. Earlier versions bounced eth0;
-│       that fixed only the first, CREATED the second by churning network
-│       agents, and fought tp_watchdog. Reboots are safe to repeat.
-│   └── Heartbeat is the ONLY reliable failure signal: during the failure
-│       dumpsys on the display can report a healthy validated network, so the
-│       display cannot self-detect it. Detection must live here.
+│   └── NOW A BACKSTOP. The real failure (ground-truthed over adb 2026-06-09)
+│       is eth0 losing its DHCP lease / network config: no IPv4, no routes,
+│       all IPv4 dead even at root. The display self-heals on-device via
+│       net_watchdog.sh (below), so this rarely fires. Rough edge: it can
+│       reboot a display that only just booted (heartbeat is briefly stale
+│       right after boot), so treat it as defence-in-depth.
+│   └── Keys off the heartbeat (last-poll.txt). Contrary to earlier notes,
+│       the failure CAN be self-detected on-device by reachability (can the
+│       display ping Massey), which is exactly what net_watchdog.sh does.
 │   └── Conflicts with tools/remote_shell.py – only one binds port 9999
 ├── tplink_admin.py
 │   └── Cookie auth to WR802N admin UI (status / reboot)
@@ -54,21 +55,28 @@ TP-Link TL-WR802N (Client mode, pure bridge, .253)
 ├── OUTBOUND only (3-address WiFi limitation)
 │   └── Display → Massey: works
 │   └── Massey → Display: BLOCKED (no inbound)
-└── Radio flaps intermittently; tp_watchdog.sh auto-reboots
+└── Radio flaps + high latency (1.5-2.5s); net_watchdog.sh on the
+    display rides it out (re-DHCP, then reboot if still unreachable)
 
 EPD-42S Display (DHCP from Massey via bridge)
 ├── /system/bin/install-recovery.sh (boot hook)
 │   └── Waits for eth0 IP (max 60s), then launches supervisor.sh
 ├── /data/local/tmp/supervisor.sh
-│   └── Every 60s, respawns display_remote.sh + tp_watchdog.sh if dead.
+│   └── Every 60s, respawns display_remote.sh + net_watchdog.sh if dead.
 │   └── Without this, a single daemon crash takes the recovery loop
 │       offline until physical OS reboot (panel power-cycle is not enough,
 │       because Android keeps running through it).
-├── /data/local/tmp/tp_watchdog.sh
-│   └── Pings Mac mini every 60s, reboots bridge after 3 failures.
-│   └── NOTE: its nc check is root-level, so it cannot see the ENETUNREACH
-│       bug (root networking works while apps are dead). That failure is
-│       handled by auto_recover.py on Massey, keyed off the heartbeat.
+├── /data/local/tmp/net_watchdog.sh  ← PRIMARY network self-heal
+│   └── Every 45s checks it can REACH Massey (root ping). Reachability is
+│       the only trustworthy signal: Android 5.1 uses policy routing, so a
+│       populated main route table can still be fully unreachable, and
+│       netcfg-style re-DHCP repopulates the main table without restoring
+│       the netd per-network routing.
+│   └── On failure: netcfg eth0 dhcp (light); if still unreachable after a
+│       few cycles, reboot (the framework rebuilds eth0 cleanly at boot).
+│       All on-device, so it heals with NOTHING plugged in: no Massey, no
+│       reverse shell, no physical unplug. Replaces tp_watchdog.sh (which
+│       rebooted the bridge, wrong target). Log: net_watchdog.log.
 ├── /data/local/tmp/display_remote.sh
 │   └── Connects OUT to Mac mini :9999 every 30s (reverse shell)
 ├── Patched OpenDisplay APK (BootReceiver auto-launches)
@@ -156,18 +164,22 @@ Two-tier strategy:
 ## Network Topology (important)
 
 The TP-Link WR802N is in **Client mode (pure bridge)**, NOT NAT/WISP.
-- Display gets a Massey DHCP lease directly
+- Display gets its DHCP lease from the LAN router 192.168.1.1 (24h lease),
+  bridged through the WR802N. A working lease has gateway 192.168.1.253
+  (the bridge); the recurring failure is eth0 losing this lease entirely
+  (see net_watchdog.sh). The bridge admin (.253) is reachable only from
+  the display's own LAN side, never from Massey.
 - **Outbound only**: display can reach Mac mini, but Mac mini CANNOT
   reach display (3-address WiFi framing limitation)
 - `adb connect` from Mac mini does NOT work; use the reverse shell
-- Radio flaps: bridge drops WiFi intermittently; tp_watchdog.sh on
-  the display auto-reboots it via admin UI cookie auth
+- Radio flaps + high latency (1.5-2.5s): net_watchdog.sh on the display
+  re-DHCPs and, if still unreachable, reboots to recover
 
 ## Display Boot Sequence
 
 1. Power on → init.rc runs install-recovery.sh (class main, oneshot)
-2. install-recovery.sh retries DHCP 8x, starts tp_watchdog.sh +
-   display_remote.sh daemons
+2. install-recovery.sh retries DHCP 8x, launches supervisor.sh, which
+   starts net_watchdog.sh + display_remote.sh daemons
 3. adbd starts on TCP 5555 (from /data/local.prop)
 4. BOOT_COMPLETED → OpenDisplay BootReceiver → MainActivity launches
 5. OpenDisplay polls Mac mini server, renders newspaper

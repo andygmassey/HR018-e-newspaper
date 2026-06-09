@@ -6,23 +6,27 @@ Listens on port 9999 for the display's persistent reverse-shell dial-in
 images/last-poll.txt (the server heartbeat) as the source of truth for
 whether the display is actually serving.
 
-WHY HEARTBEAT, NOT AN ON-DEVICE CHECK
-The display cannot reliably self-detect the failure: during it, the
-display's own `dumpsys connectivity` can report a healthy validated network
-while the app still cannot connect, and `tp_watchdog.sh`'s root-level `nc`
-also passes (root networking works while only apps are broken). The Mac
-mini heartbeat is the only trustworthy signal: if last-poll.txt stops
-advancing, the display has stopped serving.
+STATUS: BACKSTOP ONLY (since 2026-06-09)
+The display now self-heals on-device via net_watchdog.sh, which detects the
+failure by reachability and recovers locally (re-DHCP, then reboot) with no
+dependency on Massey or the reverse shell. This daemon is kept as external
+defence-in-depth and should rarely fire. Rough edge to be aware of: because
+the heartbeat is briefly stale right after any boot, this can reboot a
+display that has only just come back up; rely on net_watchdog for primary
+recovery.
 
-RECOVERY: REBOOT, NOTHING CLEVER
-The failure has shown up in two forms: a valid Ethernet network agent the
-app cannot bind (ENETUNREACH), and no Ethernet network agent at all
-(`Active default network: none`). A full reboot recreates the network
-stack from scratch and has reliably cleared both in practice. The eth0
-bounce that earlier versions used was a mistake: it fixes only the first
-form, can CREATE the second by churning network agents, and fights
-tp_watchdog.sh (which also touches eth0 / the bridge). So recovery here is
-simply: reboot the display.
+WHAT THE FAILURE ACTUALLY IS (ground-truthed over adb 2026-06-09)
+eth0 loses its DHCP lease / network config: dhcpcd drops, the interface
+keeps running at L2 but has no IPv4 address and no routes, so ALL IPv4 dies
+(even root). Earlier docs here were wrong: it is not an app-only ENETUNREACH
+with root networking intact, and the "60-second bridge lease" never existed
+(the live lease is 24h from the router 192.168.1.1).
+
+RECOVERY: REBOOT
+This daemon's only lever over the reverse shell is a full reboot, which has
+the Android framework rebuild eth0's network from scratch (the only thing
+that reliably restores the netd policy routing). The old eth0-bounce recipe
+was a mistake and is retired.
 
 CASCADE SAFETY
 A reboot is safe to repeat (unlike eth0 bouncing, which wedged the network

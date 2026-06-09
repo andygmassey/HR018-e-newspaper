@@ -36,8 +36,8 @@ TP-Link WR802N (Client mode bridge, WiFi-to-Ethernet)
 
 EPD-42S Display (Android 5.1.1, Ethernet via bridge)
 ├── install-recovery.sh → waits for eth0, then launches supervisor.sh at boot
-├── supervisor.sh → respawns dead daemons every 60s (the self-healing core)
-├── tp_watchdog.sh → auto-reboots bridge on connectivity loss
+├── supervisor.sh → respawns dead daemons every 60s
+├── net_watchdog.sh → checks it can reach Massey; re-DHCPs eth0, reboots if still unreachable (on-device network self-heal)
 ├── display_remote.sh → reverse shell to Mac mini (recovery channel + OTA)
 └── OpenDisplay WiFi app → polls server, renders on e-ink panel
 ```

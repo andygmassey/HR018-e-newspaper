@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # /data/local/tmp/supervisor.sh
 #
-# Watchdog for the on-device daemons (display_remote.sh and tp_watchdog.sh).
+# Watchdog for the on-device daemons (display_remote.sh and net_watchdog.sh).
 # Started by /system/bin/install-recovery.sh on boot. Runs forever; every
 # 60 seconds checks whether each daemon is in the process table and
 # restarts any that have died. Logs to /data/local/tmp/supervisor.log.
@@ -18,7 +18,7 @@
 # `busybox ps w` to match the script name in the cmdline.
 
 LOG=/data/local/tmp/supervisor.log
-DAEMONS="display_remote.sh tp_watchdog.sh"
+DAEMONS="display_remote.sh net_watchdog.sh"
 INTERVAL=60
 
 log() {
