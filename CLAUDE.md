@@ -178,6 +178,23 @@ The TP-Link WR802N is in **Client mode (pure bridge)**, NOT NAT/WISP.
 - Radio flaps + high latency (1.5-2.5s): net_watchdog.sh on the display
   reboots it when it cannot reach Massey for ~2 min (reboot-only self-heal)
 
+### Bridge channel-lock gotcha (if it breaks right after a long power-off)
+
+Client mode locks the WR802N to ONE specific AP radio (BSSID + channel),
+not just the SSID. If the upstream WiFi is a mesh (multiple radios on the
+same SSID) and the whole setup is powered off for days, the mesh can come
+back on a different channel, leaving the bridge nailed to a radio that no
+longer exists. Symptom: months-stable display starts flapping and NO
+reboot or power-cycle (of display or bridge) fixes it, because they all
+reconnect to the same dead lock. Diagnose via the bridge admin from the
+display side: `StatusRpm.htm` shows the stuck channel, and
+`popupSiteSurveyRpm.htm?wzd=2` shows the SSID's radios on their current
+channel. Fix = re-pair the bridge to a live radio through its setup wizard
+(WzdWlanTypeRpm `opmode=5` Client -> WzdWlanClientRpm with brlssid/brlbssid/
+keytype=4/keytext -> WzdEndRpm `Reboot=Reboot`). A dual-band bridge or a
+mesh satellite with the display's Ethernet in its LAN port is the permanent
+cure for this fragility.
+
 ## Display Boot Sequence
 
 1. Power on → init.rc runs install-recovery.sh (class main, oneshot)

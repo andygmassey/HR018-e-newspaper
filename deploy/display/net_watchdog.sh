@@ -36,8 +36,15 @@
 LOG=/data/local/tmp/net_watchdog.log
 TARGET=192.168.1.72
 INTERVAL=30
-REBOOT_AFTER=4      # ~2 min of unreachability past the grace window
-GRACE_UPTIME=150    # don't reboot in the first 2.5 min after a boot
+# Be PATIENT. The WiFi bridge flaps: it can be unreachable for several
+# minutes and then recover on its own (the OpenDisplay app reconnects by
+# itself, no reboot needed). Rebooting on a flap is pointless (the bridge
+# re-associates either way) and disruptive, and a short threshold caused a
+# reboot loop every ~4-5 min (observed 2026-06-09). Only reboot for a
+# genuine long dead-end like the original hours-long stall. The reboot is
+# the LAST resort; Massey's auto_recover (heartbeat) is a parallel backstop.
+REBOOT_AFTER=20     # ~10 min of CONTINUOUS unreachability before a reboot
+GRACE_UPTIME=240    # don't count failures in the first 4 min after a boot
 
 logln() {
     UP=$(busybox awk '{print int($1)}' /proc/uptime 2>/dev/null)

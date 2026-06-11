@@ -39,7 +39,7 @@ State (attempt count + last action time) is persisted to
 images/auto-recover-state.json so restarts do not reset the backoff.
 
 Conflicts: only one process can bind port 9999. To use tools/remote_shell.py
-or tools/fix_display.py interactively, stop this daemon first
+interactively, stop this daemon first
 (launchctl unload ~/Library/LaunchAgents/com.e-newspaper.auto-recover.plist).
 """
 from __future__ import annotations

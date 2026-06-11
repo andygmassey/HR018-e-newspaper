@@ -76,9 +76,9 @@ that has only just booted (heartbeat is briefly stale right after boot), so
 it is defence-in-depth, not the primary mechanism.
 
 Superseded: `tp_watchdog.sh` (rebooted the TP-Link bridge, wrong target,
-the bridge is not the fault) and the eth0-bounce recipe in
-`tools/fix_display.py`. The reboot-loop-from-Massey approach is no longer
-the primary recovery. A hardware swap to a GL.iNet GL-MT300N-V2 is still a
+the bridge is not the fault) and the old eth0-bounce recovery recipe. The
+reboot-loop-from-Massey approach is no longer the primary recovery. A
+hardware swap to a GL.iNet GL-MT300N-V2 is still a
 sensible long-term upgrade for the flaky, high-latency WiFi bridge, but is
 no longer required to keep the display alive.
 
